@@ -17,9 +17,13 @@ let SUPABASE_ANON_KEY = '';
 let GEMINI_API_KEY = '';
 
 try {
-  SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
-  SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-  GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+  // Viteの置換を活かしつつ、import.meta.env が無い環境でのクラッシュ(白画面)を完全防止する安全な書き方
+  // @ts-ignore
+  SUPABASE_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || '';
+  // @ts-ignore
+  SUPABASE_ANON_KEY = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) || '';
+  // @ts-ignore
+  GEMINI_API_KEY = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) || '';
 } catch (e) {
   console.warn("環境変数の読み込みをスキップしました");
 }
@@ -31,10 +35,17 @@ const isSupabaseReady = isCreateClientImported && hasEnvVars;
 let supabase;
 
 if (isSupabaseReady) {
-  // @ts-ignore
-  supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-} else {
-  const mockError = { error: { message: "環境変数またはインポートが設定されていません" }, data: null };
+  try {
+    // @ts-ignore
+    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  } catch (error) {
+    console.error("Supabase初期化エラー", error);
+  }
+} 
+
+// Supabaseが未準備、または初期化に失敗した場合のモック
+if (!supabase) {
+  const mockError = { error: { message: "環境変数またはインポートが設定されていません。Vercelの設定を確認してください。" }, data: null };
   supabase = {
     auth: {
       getSession: () => Promise.resolve({ data: { session: null } }),
