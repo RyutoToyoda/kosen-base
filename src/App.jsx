@@ -31,31 +31,33 @@ import {
 
 // =========================================================================
 // 【重要】本番環境（Vercel）で動かすための最終ステップ
-// 以下の1行の先頭の「// 」を必ず消して保存してください！
+// 以下の1行の先頭の「// 」を必ず消して保存し、GitHubにプッシュしてください！
 // =========================================================================
-import { createClient } from '@supabase/supabase-js';
+// import { createClient } from '@supabase/supabase-js';
 
 /**
  * 環境変数の安全な読み込み
- * import.meta が利用できない環境でのクラッシュを防ぐため、try-catchと
- * プロパティアクセスを分離して定義します。
+ * Viteのビルド時警告を回避し、ランタイムでのクラッシュを防ぐための防衛的コード
  */
-const getViteEnv = (key) => {
+const getSafeEnv = (name) => {
   try {
-    // @ts-ignore
-    const env = import.meta.env;
-    return env ? env[key] : '';
+    // Viteはビルド時に import.meta.env.VITE_XXX を静的に置換します
+    if (name === 'VITE_SUPABASE_URL') return import.meta.env.VITE_SUPABASE_URL || '';
+    if (name === 'VITE_SUPABASE_ANON_KEY') return import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+    if (name === 'VITE_GEMINI_API_KEY') return import.meta.env.VITE_GEMINI_API_KEY || '';
+    return '';
   } catch (e) {
     return '';
   }
 };
 
-const SUPABASE_URL = getViteEnv('VITE_SUPABASE_URL');
-const SUPABASE_ANON_KEY = getViteEnv('VITE_SUPABASE_ANON_KEY');
-const GEMINI_API_KEY = getViteEnv('VITE_GEMINI_API_KEY');
+const SUPABASE_URL = getSafeEnv('VITE_SUPABASE_URL');
+const SUPABASE_ANON_KEY = getSafeEnv('VITE_SUPABASE_ANON_KEY');
+const GEMINI_API_KEY = getSafeEnv('VITE_GEMINI_API_KEY');
 
+// ライブラリが正しく読み込まれているか、環境変数があるかをチェック
 const isCreateClientImported = typeof createClient !== 'undefined';
-const hasEnvVars = SUPABASE_URL !== '' && SUPABASE_ANON_KEY !== '';
+const hasEnvVars = SUPABASE_URL.length > 0 && SUPABASE_ANON_KEY.length > 0;
 const isSupabaseReady = isCreateClientImported && hasEnvVars;
 
 let supabase;
@@ -64,20 +66,18 @@ if (isSupabaseReady) {
   // @ts-ignore
   supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 } else {
-  // 開発/プレビュー用モック
+  // 開発/エラー回避用のダミーオブジェクト
   supabase = {
     auth: {
       getSession: () => Promise.resolve({ data: { session: null } }),
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
-      signInWithPassword: () => Promise.resolve({ error: null }),
-      signUp: () => Promise.resolve({ error: null }),
+      signInWithPassword: () => Promise.resolve({ error: { message: 'Supabaseが初期化されていません' } }),
+      signUp: () => Promise.resolve({ error: { message: 'Supabaseが初期化されていません' } }),
       signOut: () => Promise.resolve({ error: null }),
       updateUser: () => Promise.resolve({ error: null, data: { user: {} } })
     },
     from: () => ({
-      select: () => ({
-        order: () => Promise.resolve({ data: [], error: null })
-      }),
+      select: () => ({ order: () => Promise.resolve({ data: [], error: null }) }),
       insert: () => Promise.resolve({ error: null }),
       delete: () => ({ eq: () => Promise.resolve({ error: null }) })
     })
@@ -85,21 +85,22 @@ if (isSupabaseReady) {
 }
 
 const INITIAL_CHAT = [
-  { id: 1, sender: 'ai', text: 'こんにちは！KOSEN-base AIアシスタントです。学習の質問や過去問の分析、将来のキャリア相談など何でも聞いてください。' }
+  { id: 1, sender: 'ai', text: 'こんにちは！KOSEN-base AIアシスタントです。学習の相談や過去問の分析、将来のキャリアについて何でも聞いてください。' }
 ];
 
-// ヘルパー：アイテムの種類を判定
+// ヘルパー：アイテムの種類をタグから判定
 const getItemType = (tags) => {
-  if (!tags) return 'note';
+  if (!tags || !Array.isArray(tags)) return 'note';
   if (tags.includes('type:exam')) return 'exam';
   if (tags.includes('type:material')) return 'material';
   return 'note';
 };
 
-// ヘルパー：過去問のメタデータを抽出
+// ヘルパー：過去問のメタデータをタグから抽出
 const getExamMeta = (tags) => {
   const meta = { grade: '未設定', term: '未設定', examType: '未設定' };
   tags?.forEach(t => {
+    if (typeof t !== 'string') return;
     if (t.startsWith('grade:')) meta.grade = t.replace('grade:', '');
     if (t.startsWith('term:')) meta.term = t.replace('term:', '');
     if (t.startsWith('exam:')) meta.examType = t.replace('exam:', '');
@@ -108,7 +109,7 @@ const getExamMeta = (tags) => {
 };
 
 export default function App() {
-  // --- ステート管理 ---
+  // --- ステート：認証 ---
   const [session, setSession] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [email, setEmail] = useState('');
@@ -117,6 +118,7 @@ export default function App() {
   const [isAuthSubmitLoading, setIsAuthSubmitLoading] = useState(false);
   const [isLoginMode, setIsLoginMode] = useState(true);
 
+  // --- ステート：メインコンテンツ ---
   const [notes, setNotes] = useState([]);
   const [activeView, setActiveView] = useState('dashboard');
   const [isLoading, setIsLoading] = useState(true);
@@ -128,22 +130,23 @@ export default function App() {
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   
+  // --- ステート：詳細表示 & モーダル ---
   const [selectedNote, setSelectedNote] = useState(null);
   const [relevanceAnalysis, setRelevanceAnalysis] = useState({ loading: false, text: null, error: null });
-  
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newItemType, setNewItemType] = useState('note');
   const [newNote, setNewNote] = useState({ title: '', subject: '', preview: '', tags: '' });
   const [examMeta, setExamMeta] = useState({ grade: '1年', term: '前期', type: '中間' });
   const [isAdding, setIsAdding] = useState(false);
 
+  // --- ステート：フィルター & プロフィール ---
   const [selectedSubject, setSelectedSubject] = useState(null);
   const [examFilter, setExamFilter] = useState({ grade: '', term: '', type: '' });
-  
   const [profileForm, setProfileForm] = useState({ kosen: '', department: '', grade: '' });
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isProfileUpdating, setIsProfileUpdating] = useState(false);
 
+  // --- ステート：カレンダー ---
   const [events, setEvents] = useState({});
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null);
@@ -152,7 +155,7 @@ export default function App() {
   const fileInputRef = useRef(null);
   const chatEndRef = useRef(null);
 
-  // --- 認証・初期データ取得 ---
+  // 1. 認証の初期化
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -186,6 +189,7 @@ export default function App() {
     }
   };
 
+  // 2. データ取得
   const fetchNotes = async () => {
     if (!session) return;
     try {
@@ -205,19 +209,25 @@ export default function App() {
     else { setNotes([]); setProfileForm({ kosen: '', department: '', grade: '' }); }
   }, [session]);
 
+  // チャット自動スクロール
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, isChatLoading]);
 
-  // --- バリデーション ---
+  // 3. 準備状態のバリデーション
   const checkReady = () => {
-    if (!isCreateClientImported) throw new Error("28行目のコメントアウトを外して再デプロイしてください。");
+    if (!isCreateClientImported) {
+      throw new Error("28行目のコメントアウト (import { createClient }...) を外して保存し、再デプロイしてください。");
+    }
     if (!hasEnvVars) {
-      throw new Error(`環境変数が読み込めていません。VercelでRedeployをしてください。`);
+      const missing = [];
+      if (!SUPABASE_URL) missing.push("URL");
+      if (!SUPABASE_ANON_KEY) missing.push("ANON_KEY");
+      throw new Error(`環境変数 (${missing.join(', ')}) が読み込めていません。Vercelで「Redeploy」を行ってください。`);
     }
   };
 
-  // --- アクションハンドラー ---
+  // 4. アクションハンドラー
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
     setIsProfileUpdating(true);
@@ -236,7 +246,7 @@ export default function App() {
       setAnalyzeMessage({ type: 'success', text: 'プロフィールを更新しました。' });
       setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 3000);
     } catch (err) {
-      setAnalyzeMessage({ type: 'error', text: '更新に失敗しました。' });
+      setAnalyzeMessage({ type: 'error', text: 'プロフィールの更新に失敗しました。' });
     } finally {
       setIsProfileUpdating(false);
     }
@@ -248,24 +258,20 @@ export default function App() {
     setIsAdding(true); setAnalyzeMessage({ type: null, text: null });
     try {
       checkReady();
-      const parsedTags = newNote.tags.split(',').map(t => t.trim()).filter(Boolean);
-      parsedTags.push(`type:${newItemType}`);
+      const tags = newNote.tags.split(',').map(t => t.trim()).filter(Boolean);
+      tags.push(`type:${newItemType}`);
       if (newItemType === 'exam') {
-        parsedTags.push(`grade:${examMeta.grade}`);
-        parsedTags.push(`term:${examMeta.term}`);
-        parsedTags.push(`exam:${examMeta.type}`);
+        tags.push(`grade:${examMeta.grade}`, `term:${examMeta.term}`, `exam:${examMeta.type}`);
       }
-      const noteData = {
-        title: newNote.title, subject: newNote.subject, preview: newNote.preview, tags: parsedTags,
+      const { error } = await supabase.from('notes').insert([{
+        title: newNote.title, subject: newNote.subject, preview: newNote.preview, tags: tags,
         date: new Date().toISOString().split('T')[0], user_id: session.user.id
-      };
-      const { error } = await supabase.from('notes').insert([noteData]);
+      }]);
       if (error) throw error;
       await fetchNotes();
-      setAnalyzeMessage({ type: 'success', text: 'アイテムを追加しました！' });
-      setIsAddModalOpen(false); 
-      setNewNote({ title: '', subject: '', preview: '', tags: '' });
-    } catch (err) { setAnalyzeMessage({ type: 'error', text: `${err.message}` }); } 
+      setAnalyzeMessage({ type: 'success', text: 'アイテムを追加しました。' });
+      setIsAddModalOpen(false); setNewNote({ title: '', subject: '', preview: '', tags: '' });
+    } catch (err) { setAnalyzeMessage({ type: 'error', text: err.message }); } 
     finally { setIsAdding(false); setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 5000); }
   };
 
@@ -286,32 +292,32 @@ export default function App() {
       const response = await fetch(apiUrl, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ role: "user", parts: [
-          { text: "学習ノートの画像を解析し、タイトル、科目、詳細な要約を抽出してください。\n{\n  \"title\": \"\",\n  \"subject\": \"\",\n  \"preview\": \"\",\n  \"tags\": []\n}" },
+          { text: "高専の学習ノート画像を解析し、JSON形式で返してください。タイトル、科目、詳細な要約を抽出してください。\n{\n  \"title\": \"\",\n  \"subject\": \"\",\n  \"preview\": \"\",\n  \"tags\": []\n}" },
           { inlineData: { mimeType: file.type, data: base64Data } }
         ]}]})
       });
-      if (!response.ok) throw new Error("AI解析に失敗しました。");
+      if (!response.ok) throw new Error("AI解析エラーが発生しました。");
       const result = await response.json();
-      const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-      const parsedData = JSON.parse(text.replace(/```json/gi, '').replace(/```/g, '').trim());
-      const finalTags = parsedData.tags || [];
-      finalTags.push('type:note');
-      const { error } = await supabase.from('notes').insert([{ ...parsedData, tags: finalTags, date: new Date().toISOString().split('T')[0], user_id: session.user.id }]);
+      const aiResponse = result.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      const parsedData = JSON.parse(aiResponse.replace(/```json/gi, '').replace(/```/g, '').trim());
+      const tags = parsedData.tags || [];
+      tags.push('type:note');
+      const { error } = await supabase.from('notes').insert([{ ...parsedData, tags, date: new Date().toISOString().split('T')[0], user_id: session.user.id }]);
       if (error) throw error;
       await fetchNotes();
-      setAnalyzeMessage({ type: 'success', text: '画像からノートを作成しました！' });
-    } catch (err) { setAnalyzeMessage({ type: 'error', text: `${err.message}` }); } 
+      setAnalyzeMessage({ type: 'success', text: '画像をノートとして保存しました！' });
+    } catch (err) { setAnalyzeMessage({ type: 'error', text: err.message }); } 
     finally { setIsAnalyzing(false); setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 7000); }
   };
 
   const handleAnalyzeAI = async (item) => {
     setRelevanceAnalysis({ loading: true, text: null, error: null });
     try {
-      if (!GEMINI_API_KEY) throw new Error("AIキーが設定されていません。");
+      if (!GEMINI_API_KEY) throw new Error("APIキーが設定されていません。");
       const type = getItemType(item.tags);
       const prompt = type === 'exam' 
-        ? `高専の教員として回答してください。この過去問のタイトル「${item.title}」と内容「${item.preview}」から、出題分野を特定し、解法のポイントを3つ簡潔に解説してください。`
-        : `この学習内容「${item.title}」が、高専の各学科（機械・電気・情報・建築・物質）で将来どう活用されるか、学科ごとに1行ずつ簡潔に教えてください。`;
+        ? `高専の教員として、この過去問のタイトル「${item.title}」と内容「${item.preview}」から出題分野を特定し、解法のポイントを3点簡潔に教えてください。`
+        : `この学習内容「${item.title}」が、高専の各学科（機械・電気・情報・建築・物質）で将来どう使われるか、学科ごとに1行ずつ簡潔に教えてください。`;
       
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
       const response = await fetch(apiUrl, {
@@ -332,13 +338,13 @@ export default function App() {
     try {
       if (!GEMINI_API_KEY) {
         await new Promise(r => setTimeout(r, 1000));
-        setChatMessages(prev => [...prev, { id: Date.now() + 1, sender: 'ai', text: 'デモモードです。VercelでGemini APIキーを設定してください。' }]);
+        setChatMessages(prev => [...prev, { id: Date.now() + 1, sender: 'ai', text: 'APIキーが未設定のため、デモモードで動作しています。Vercelでキーを設定してください。' }]);
         return;
       }
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
       const response = await fetch(apiUrl, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: `あなたは高専生専用のアシスタントです。質問: ${userText}` }] }] })
+        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: `あなたは高専生をサポートする優秀なAI学習アシスタントです。質問: ${userText}` }] }] })
       });
       const result = await response.json();
       setChatMessages(prev => [...prev, { id: Date.now() + 1, sender: 'ai', text: result.candidates[0].content.parts[0].text }]);
@@ -347,18 +353,18 @@ export default function App() {
   };
 
   const deleteItem = async (id) => {
-    if (!window.confirm("完全に削除しますか？")) return;
+    if (!window.confirm("完全に削除してもよろしいですか？")) return;
     try {
       checkReady();
       await supabase.from('notes').delete().eq('id', id);
       setNotes(prev => prev.filter(n => n.id !== id));
       setSelectedNote(null);
-      setAnalyzeMessage({ type: 'success', text: '削除しました。' });
+      setAnalyzeMessage({ type: 'success', text: 'アイテムを削除しました。' });
     } catch (e) { setAnalyzeMessage({ type: 'error', text: e.message }); }
     finally { setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 3000); }
   };
 
-  // --- カレンダー計算 ---
+  // 5. カレンダー生成
   const getCalendar = () => {
     const d = new Date();
     const year = d.getFullYear();
@@ -374,25 +380,25 @@ export default function App() {
   };
   const calendar = getCalendar();
 
-  // --- UI描画ヘルパー ---
+  // 6. 描画ヘルパー
   const renderCard = (note) => {
     const type = getItemType(note.tags);
     const meta = type === 'exam' ? getExamMeta(note.tags) : null;
     return (
-      <div key={note.id} onClick={() => setSelectedNote(note)} className="bg-[#11192a] border border-slate-800 rounded-3xl p-6 hover:border-emerald-500/50 hover:bg-[#162136] transition-all cursor-pointer group flex flex-col shadow-xl min-h-[260px] relative">
-        <div className="flex justify-between items-start mb-4">
+      <div key={note.id} onClick={() => setSelectedNote(note)} className="bg-[#11192a] border border-slate-800 rounded-[32px] p-7 hover:border-emerald-500/50 hover:bg-[#162136] transition-all cursor-pointer group flex flex-col shadow-2xl min-h-[280px] relative text-left">
+        <div className="flex justify-between items-start mb-5">
           <div className="flex flex-wrap gap-2">
-            <span className={`text-[10px] font-black px-2.5 py-1 rounded border uppercase tracking-tighter ${type === 'exam' ? 'bg-red-950/30 text-red-400 border-red-500/20' : type === 'material' ? 'bg-blue-950/30 text-blue-400 border-blue-500/20' : 'bg-[#1e293b] text-emerald-400 border-emerald-500/20'}`}>
+            <span className={`text-[10px] font-black px-3 py-1 rounded-full border uppercase tracking-widest shadow-sm ${type === 'exam' ? 'bg-red-950/30 text-red-400 border-red-500/20' : type === 'material' ? 'bg-blue-950/30 text-blue-400 border-blue-500/20' : 'bg-[#1e293b] text-emerald-400 border-emerald-500/20'}`}>
               {note.subject}
             </span>
-            {type === 'exam' && <span className="text-[10px] font-black px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700 uppercase tracking-tighter shadow-sm">{meta.grade} {meta.term}</span>}
+            {type === 'exam' && <span className="text-[10px] font-black px-3 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700 uppercase tracking-widest">{meta.grade} {meta.term}</span>}
           </div>
-          <button onClick={(e) => { e.stopPropagation(); deleteItem(note.id); }} className="p-1.5 hover:bg-red-500/10 rounded-lg text-slate-600 hover:text-red-400 transition-colors transition-transform active:scale-90"><Trash2 className="w-4 h-4" /></button>
+          <button onClick={(e) => { e.stopPropagation(); deleteItem(note.id); }} className="p-2 hover:bg-red-500/10 rounded-full text-slate-600 hover:text-red-400 transition-all active:scale-90"><Trash2 className="w-4 h-4" /></button>
         </div>
-        <h3 className="text-xl font-black text-white mb-3 group-hover:text-emerald-400 transition-colors line-clamp-2 leading-snug">{note.title}</h3>
-        <p className="text-sm text-slate-400 line-clamp-3 mb-4 leading-relaxed font-medium">{note.preview}</p>
-        <div className="mt-auto pt-4 border-t border-slate-800/50 flex items-center text-[10px] text-slate-500 font-mono font-bold tracking-tight">
-          <Clock className="w-3 h-3 mr-1.5 text-emerald-500/60" />{note.date}
+        <h3 className="text-xl font-black text-white mb-3 group-hover:text-emerald-400 transition-colors line-clamp-2 leading-snug tracking-tight">{note.title}</h3>
+        <p className="text-sm text-slate-400 line-clamp-3 mb-6 leading-relaxed font-medium opacity-80">{note.preview}</p>
+        <div className="mt-auto pt-5 border-t border-slate-800/50 flex items-center text-[10px] text-slate-600 font-mono font-black tracking-widest uppercase">
+          <Clock className="w-3 h-3 mr-2 text-emerald-500/60" />{note.date}
         </div>
       </div>
     );
@@ -403,47 +409,39 @@ export default function App() {
     return n.title.toLowerCase().includes(q) || n.subject.toLowerCase().includes(q) || (n.preview && n.preview.toLowerCase().includes(q));
   });
 
-  const menuItems = [
-    { id: 'dashboard', label: 'ダッシュボード', icon: LayoutDashboard },
-    { id: 'notes', label: 'マイノート', icon: BookOpen },
-    { id: 'exams', label: '過去問', icon: FileText },
-    { id: 'materials', label: '学習資料', icon: Bookmark },
-    { id: 'calendar', label: 'カレンダー', icon: CalendarIcon },
-  ];
-
-  if (isAuthLoading) return <div className="flex h-screen w-full bg-[#0a0f18] items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-emerald-500" /></div>;
+  if (isAuthLoading) return <div className="flex h-screen w-full bg-[#0a0f18] items-center justify-center"><Loader2 className="w-12 h-12 animate-spin text-emerald-500" /></div>;
 
   if (!session) {
     return (
       <div className="flex h-screen w-full bg-[#0a0f18] text-slate-200 items-center justify-center relative overflow-hidden">
-        <div className="absolute top-[-20%] left-[-20%] w-[600px] h-[600px] bg-emerald-500/5 blur-[120px] rounded-full animate-pulse"></div>
-        <div className="w-full max-w-md bg-[#0d1424]/90 backdrop-blur-2xl border border-slate-800 rounded-[40px] p-10 shadow-2xl relative z-10 mx-4">
-          <div className="flex justify-center mb-8">
-            <div className="w-20 h-20 bg-emerald-500/10 rounded-2xl flex items-center justify-center border border-emerald-500/20 shadow-inner">
-              <GraduationCap className="w-10 h-10 text-emerald-500" />
+        <div className="absolute top-[-20%] left-[-20%] w-[800px] h-[800px] bg-emerald-500/5 blur-[160px] rounded-full animate-pulse"></div>
+        <div className="w-full max-w-md bg-[#0d1424]/90 backdrop-blur-3xl border border-slate-800 rounded-[48px] p-12 shadow-2xl relative z-10 mx-4">
+          <div className="flex justify-center mb-10">
+            <div className="w-24 h-24 bg-emerald-500/10 rounded-3xl flex items-center justify-center border border-emerald-500/20 shadow-inner">
+              <GraduationCap className="w-12 h-12 text-emerald-500" />
             </div>
           </div>
-          <h1 className="text-3xl font-black text-center text-white mb-2 uppercase tracking-[0.2em]">KOSEN-base</h1>
-          <p className="text-center text-slate-500 text-[10px] font-black mb-10 tracking-[0.3em] uppercase opacity-50">Technical College Education Hub</p>
+          <h1 className="text-4xl font-black text-center text-white mb-2 uppercase tracking-[0.15em] tracking-tighter">KOSEN-base</h1>
+          <p className="text-center text-slate-600 text-[10px] font-black mb-12 tracking-[0.4em] uppercase opacity-60 leading-none">Engineering Hub for Students</p>
           <form className="space-y-6" onSubmit={(e) => {
             e.preventDefault();
             setIsAuthSubmitLoading(true); setAuthError('');
             const action = isLoginMode ? supabase.auth.signInWithPassword({ email, password }) : supabase.auth.signUp({ email, password });
             action.then(({error}) => {
               if (error) setAuthError(error.message);
-              else if (!isLoginMode) alert("確認メールを送信しました。");
+              else if (!isLoginMode) alert("確認メールを送信しました。リンクをクリックしてください。");
               setIsAuthSubmitLoading(false);
             });
           }}>
             <div className="flex bg-[#161f33] p-1.5 rounded-2xl mb-8 shadow-inner border border-slate-800">
-              <button type="button" onClick={() => setIsLoginMode(true)} className={`flex-1 py-2.5 text-xs font-black uppercase rounded-xl transition-all ${isLoginMode ? 'bg-slate-700 text-white shadow-lg' : 'text-slate-500'}`}>LOGIN</button>
-              <button type="button" onClick={() => setIsLoginMode(false)} className={`flex-1 py-2.5 text-xs font-black uppercase rounded-xl transition-all ${!isLoginMode ? 'bg-slate-700 text-white shadow-lg' : 'text-slate-500'}`}>SIGN UP</button>
+              <button type="button" onClick={() => setIsLoginMode(true)} className={`flex-1 py-3 text-xs font-black uppercase rounded-xl transition-all ${isLoginMode ? 'bg-slate-700 text-white shadow-lg' : 'text-slate-500'}`}>LOGIN</button>
+              <button type="button" onClick={() => setIsLoginMode(false)} className={`flex-1 py-3 text-xs font-black uppercase rounded-xl transition-all ${!isLoginMode ? 'bg-slate-700 text-white shadow-lg' : 'text-slate-500'}`}>SIGN UP</button>
             </div>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-2xl px-6 py-4 text-sm focus:outline-none focus:border-emerald-500 transition-all font-bold" placeholder="Email Address" />
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-2xl px-6 py-4 text-sm focus:outline-none focus:border-emerald-500 transition-all font-bold" placeholder="Password" />
-            {authError && <div className="text-red-400 text-xs flex items-start bg-red-400/10 p-4 rounded-2xl border border-red-500/20"><AlertCircle className="w-4 h-4 mr-3 shrink-0" />{authError}</div>}
-            <button type="submit" disabled={isAuthSubmitLoading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-[20px] font-black transition-all shadow-xl shadow-emerald-900/40 active:scale-95 flex items-center justify-center disabled:opacity-50">
-              {isAuthSubmitLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : (isLoginMode ? 'ログイン' : '新規登録')}
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[20px] px-6 py-5 text-sm focus:border-emerald-500 transition-all font-bold placeholder:text-slate-700" placeholder="Email Address" />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[20px] px-6 py-5 text-sm focus:border-emerald-500 transition-all font-bold placeholder:text-slate-700" placeholder="Password" />
+            {authError && <div className="text-red-400 text-xs flex items-start bg-red-400/5 p-5 rounded-2xl border border-red-500/20"><AlertCircle className="w-5 h-5 mr-3 shrink-0" />{authError}</div>}
+            <button type="submit" disabled={isAuthSubmitLoading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-5 rounded-[24px] font-black transition-all shadow-2xl shadow-emerald-900/40 active:scale-95 flex items-center justify-center disabled:opacity-50 text-sm tracking-widest uppercase">
+              {isAuthSubmitLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : (isLoginMode ? 'Sign In Now' : 'Create Account')}
             </button>
           </form>
         </div>
@@ -454,57 +452,60 @@ export default function App() {
   return (
     <div className="flex h-screen w-full bg-[#0a0f18] text-slate-200 font-sans overflow-hidden relative text-left">
       
-      {/* --- 全画面詳細ダイアログ --- */}
+      {/* 画面全体をクリックした際にメニューを閉じる透明レイヤー */}
+      {menuOpenId && <div className="fixed inset-0 z-10" onClick={() => setMenuOpenId(null)}></div>}
+
+      {/* --- 1. 全画面詳細ダイアログ --- */}
       {selectedNote && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4 sm:p-10 animate-in fade-in duration-300" onClick={() => setSelectedNote(null)}>
-          <div className="bg-[#0d1424] border border-slate-700 rounded-[40px] p-6 sm:p-12 w-full h-full max-w-6xl shadow-2xl relative flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-start mb-8 shrink-0 border-b border-slate-800 pb-8">
-              <div className="flex-1 pr-12 text-left">
-                <div className="flex gap-3 mb-5">
-                  <span className="text-xs font-black px-3.5 py-1.5 rounded-full bg-[#1e293b] text-emerald-400 border border-emerald-500/20 uppercase tracking-widest">{selectedNote.subject}</span>
-                  {getItemType(selectedNote.tags) === 'exam' && <span className="text-xs font-black px-3.5 py-1.5 rounded-full bg-red-950/30 text-red-400 border border-red-500/20">{getExamMeta(selectedNote.tags).grade} {getExamMeta(selectedNote.tags).term} {getExamMeta(selectedNote.tags).examType}</span>}
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-2xl p-4 sm:p-10 animate-in fade-in duration-500" onClick={() => setSelectedNote(null)}>
+          <div className="bg-[#0d1424] border border-slate-700 rounded-[48px] p-6 sm:p-12 w-full h-full max-w-6xl shadow-2xl relative flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-start mb-10 shrink-0 border-b border-slate-800 pb-10 text-left">
+              <div className="flex-1 pr-12">
+                <div className="flex gap-4 mb-6">
+                  <span className="text-xs font-black px-4 py-2 rounded-full bg-[#1e293b] text-emerald-400 border border-emerald-500/20 uppercase tracking-widest shadow-lg">{selectedNote.subject}</span>
+                  {getItemType(selectedNote.tags) === 'exam' && <span className="text-xs font-black px-4 py-2 rounded-full bg-red-950/30 text-red-400 border border-red-500/20 uppercase tracking-widest shadow-lg">{getExamMeta(selectedNote.tags).grade} {getExamMeta(selectedNote.tags).term} {getExamMeta(selectedNote.tags).examType}</span>}
                 </div>
-                <h2 className="text-3xl sm:text-5xl font-black text-white leading-tight tracking-tighter">{selectedNote.title}</h2>
+                <h2 className="text-4xl sm:text-6xl font-black text-white leading-tight tracking-tighter">{selectedNote.title}</h2>
               </div>
-              <button onClick={() => { setSelectedNote(null); setRelevanceAnalysis({ loading: false, text: null, error: null }); }} className="p-4 bg-slate-800/50 hover:bg-slate-700 rounded-full text-slate-400 hover:text-white transition-all shadow-lg active:scale-90"><X className="w-8 h-8" /></button>
+              <button onClick={() => { setSelectedNote(null); setRelevanceAnalysis({ loading: false, text: null, error: null }); }} className="p-5 bg-slate-800/50 hover:bg-slate-700 rounded-full text-slate-400 hover:text-white transition-all shadow-2xl active:scale-90"><X className="w-10 h-10" /></button>
             </div>
             
-            <div className="flex-1 overflow-y-auto pr-4 scrollbar-hide space-y-12">
+            <div className="flex-1 overflow-y-auto pr-4 scrollbar-hide space-y-16 text-left">
               <section>
-                <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] mb-6 flex items-center"><FileText className="w-4 h-4 mr-3" /> CONTENTS PREVIEW</h4>
-                <p className="text-slate-200 leading-relaxed whitespace-pre-wrap text-lg sm:text-xl font-medium">{selectedNote.preview}</p>
+                <h4 className="text-[10px] font-black text-slate-600 uppercase tracking-[0.5em] mb-8 flex items-center"><FileText className="w-5 h-5 mr-4" /> Description</h4>
+                <p className="text-slate-200 leading-relaxed whitespace-pre-wrap text-xl sm:text-2xl font-medium tracking-tight">{selectedNote.preview}</p>
               </section>
 
-              <section className="bg-[#161f33] border border-emerald-500/10 rounded-[32px] p-8 sm:p-10 shadow-2xl">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
-                  <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-[0.3em] flex items-center">
-                    <BrainCircuit className="w-5 h-5 mr-3" /> AI ANALYSIS
+              <section className="bg-[#161f33] border border-emerald-500/10 rounded-[40px] p-10 sm:p-14 shadow-2xl">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-10 gap-6">
+                  <h4 className="text-[11px] font-black text-emerald-400 uppercase tracking-[0.5em] flex items-center leading-none">
+                    <BrainCircuit className="w-6 h-6 mr-4" /> AI Analytics Engine
                   </h4>
                   {!relevanceAnalysis.text && !relevanceAnalysis.loading && (
-                    <button onClick={() => handleAnalyzeAI(selectedNote)} className="text-xs font-black bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-2xl flex items-center shadow-xl transition-all active:scale-95 group">
-                      <Compass className="w-4 h-4 mr-2 group-hover:rotate-180 transition-transform duration-500" /> 分析を実行
+                    <button onClick={() => handleAnalyzeAI(selectedNote)} className="text-xs font-black bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-4 rounded-[20px] flex items-center shadow-2xl transition-all active:scale-95 group tracking-widest uppercase">
+                      <Compass className="w-5 h-5 mr-3 group-hover:rotate-180 transition-transform duration-700" /> Start Analysis
                     </button>
                   )}
                 </div>
                 {relevanceAnalysis.loading && (
-                  <div className="flex flex-col items-center justify-center py-12 text-slate-400 text-sm">
-                    <Loader2 className="w-12 h-12 animate-spin text-emerald-500 mb-6" />
-                    <span className="font-black tracking-widest animate-pulse">AI IS THINKING...</span>
+                  <div className="flex flex-col items-center justify-center py-20 text-slate-500 text-sm">
+                    <Loader2 className="w-16 h-16 animate-spin text-emerald-500 mb-8" />
+                    <span className="font-black tracking-[0.3em] animate-pulse uppercase">Neural Processing...</span>
                   </div>
                 )}
                 {relevanceAnalysis.text && (
-                  <div className="text-slate-300 text-base sm:text-lg leading-loose whitespace-pre-wrap animate-in slide-in-from-bottom duration-700 p-8 bg-[#0a0f18]/50 rounded-3xl border border-slate-800 shadow-inner font-medium">
+                  <div className="text-slate-300 text-lg sm:text-xl leading-loose whitespace-pre-wrap animate-in slide-in-from-bottom duration-1000 p-10 bg-[#0a0f18]/50 rounded-[32px] border border-slate-800 shadow-inner font-medium text-left">
                     {relevanceAnalysis.text}
                   </div>
                 )}
               </section>
             </div>
             
-            <div className="mt-8 pt-8 border-t border-slate-800 flex flex-col sm:flex-row justify-between items-center gap-6 shrink-0">
-              <div className="flex items-center text-sm text-slate-500 font-mono font-black tracking-widest"><Clock className="w-5 h-5 mr-3 text-emerald-500/60" />{selectedNote.date}</div>
-              <div className="flex flex-wrap gap-3">
+            <div className="mt-10 pt-10 border-t border-slate-800 flex flex-col sm:flex-row justify-between items-center gap-8 shrink-0">
+              <div className="flex items-center text-sm text-slate-600 font-mono font-black tracking-[0.3em] uppercase"><Clock className="w-5 h-5 mr-4 text-emerald-500/60" /> Recorded: {selectedNote.date}</div>
+              <div className="flex flex-wrap gap-4">
                 {selectedNote.tags?.filter(t => !t.includes(':')).map((t, i) => (
-                  <span key={i} className="text-[10px] font-black px-4 py-1.5 rounded-full bg-[#1e293b] text-slate-400 border border-slate-700/50">#{t}</span>
+                  <span key={i} className="text-[11px] font-black px-5 py-2 rounded-full bg-[#1e293b] text-slate-400 border border-slate-700/50 hover:border-emerald-500/30 transition-colors uppercase tracking-widest shadow-sm">#{t}</span>
                 ))}
               </div>
             </div>
@@ -512,57 +513,62 @@ export default function App() {
         </div>
       )}
 
-      {/* --- プロフィール設定 --- */}
+      {/* --- 2. プロフィール設定モーダル --- */}
       {isProfileModalOpen && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 backdrop-blur-2xl p-4 animate-in fade-in duration-500">
-          <div className="bg-[#0d1424] border border-slate-700 rounded-[40px] p-10 w-full max-w-md shadow-2xl relative animate-in zoom-in-95">
-            <div className="w-20 h-20 bg-emerald-500/10 rounded-3xl flex items-center justify-center mb-8 mx-auto border border-emerald-500/20 shadow-inner">
-              <User className="w-10 h-10 text-emerald-500" />
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 backdrop-blur-3xl p-4 animate-in fade-in duration-700">
+          <div className="bg-[#0d1424] border border-slate-700 rounded-[56px] p-12 w-full max-w-md shadow-2xl relative animate-in zoom-in-95 duration-500">
+            <div className="w-24 h-24 bg-emerald-500/10 rounded-[32px] flex items-center justify-center mb-10 mx-auto border border-emerald-500/20 shadow-inner">
+              <User className="w-12 h-12 text-emerald-500" />
             </div>
-            <h2 className="text-2xl font-black text-white text-center mb-2 tracking-tight">プロフィール設定</h2>
-            <p className="text-slate-500 text-center text-[10px] font-black mb-10 tracking-widest uppercase">Set your student identity</p>
-            <form onSubmit={handleUpdateProfile} className="space-y-5">
-              <input required type="text" value={profileForm.kosen} onChange={e => setProfileForm({...profileForm, kosen: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-2xl px-6 py-4 text-sm focus:border-emerald-500 transition-all font-bold" placeholder="所属高専 (例: 東京)" />
-              <input required type="text" value={profileForm.department} onChange={e => setProfileForm({...profileForm, department: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-2xl px-6 py-4 text-sm focus:border-emerald-500 transition-all font-bold" placeholder="学科名 (例: 情報工学科)" />
-              <select required value={profileForm.grade} onChange={e => setProfileForm({...profileForm, grade: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-2xl px-6 py-4 text-sm outline-none font-bold appearance-none">
+            <h2 className="text-3xl font-black text-white text-center mb-2 tracking-tighter">Identity Setup</h2>
+            <p className="text-slate-600 text-center text-[10px] font-black mb-12 tracking-[0.4em] uppercase">Configure your college profile</p>
+            <form onSubmit={handleUpdateProfile} className="space-y-6 text-left">
+              <input required type="text" value={profileForm.kosen} onChange={e => setProfileForm({...profileForm, kosen: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[24px] px-7 py-5 text-sm focus:border-emerald-500 transition-all font-bold placeholder:text-slate-700" placeholder="高専名 (例: 東京)" />
+              <input required type="text" value={profileForm.department} onChange={e => setProfileForm({...profileForm, department: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[24px] px-7 py-5 text-sm focus:border-emerald-500 transition-all font-bold placeholder:text-slate-700" placeholder="学科名 (例: 情報工学科)" />
+              <select required value={profileForm.grade} onChange={e => setProfileForm({...profileForm, grade: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[24px] px-7 py-5 text-sm outline-none font-bold appearance-none">
                 <option value="" disabled>学年を選択</option>
                 {['1年', '2年', '3年', '4年', '5年', '専攻科'].map(g => <option key={g} value={g}>{g}</option>)}
               </select>
-              <button type="submit" disabled={isProfileUpdating} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-[20px] font-black transition-all shadow-xl active:scale-95 mt-6 flex items-center justify-center">
-                {isProfileUpdating ? <Loader2 className="w-6 h-6 animate-spin" /> : 'KOSEN-base を開始する'}
+              <button type="submit" disabled={isProfileUpdating} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-5 rounded-[28px] font-black transition-all shadow-2xl active:scale-95 mt-8 flex items-center justify-center uppercase text-xs tracking-widest">
+                {isProfileUpdating ? <Loader2 className="w-6 h-6 animate-spin" /> : 'Enter KOSEN-base'}
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* --- 追加モーダル --- */}
+      {/* --- 3. 新規追加モーダル --- */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in" onClick={() => setIsAddModalOpen(false)}>
-          <div className="bg-[#0d1424] border border-slate-700 rounded-[32px] p-8 w-full max-w-lg shadow-2xl relative animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
-            <h2 className="text-xl font-black text-white mb-8 flex items-center tracking-widest uppercase"><Plus className="w-6 h-6 mr-3 text-emerald-500" /> Create Item</h2>
-            <div className="flex bg-[#161f33] p-1.5 rounded-2xl mb-8 shadow-inner border border-slate-800">
+          <div className="bg-[#0d1424] border border-slate-700 rounded-[48px] p-10 w-full max-w-xl shadow-2xl relative animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+            <h2 className="text-2xl font-black text-white mb-10 flex items-center tracking-widest uppercase leading-none"><Plus className="w-8 h-8 mr-4 text-emerald-500" /> New Record</h2>
+            
+            <div className="flex bg-[#161f33] p-1.5 rounded-[20px] mb-10 shadow-inner border border-slate-800">
               {['note', 'exam', 'material'].map(t => (
-                <button key={t} onClick={() => setNewItemType(t)} className={`flex-1 py-2.5 text-[10px] font-black uppercase rounded-xl transition-all ${newItemType === t ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>
-                  {t === 'note' ? 'ノート' : t === 'exam' ? '過去問' : '資料'}
+                <button key={t} onClick={() => setNewItemType(t)} className={`flex-1 py-3 text-[11px] font-black uppercase rounded-2xl transition-all ${newItemType === t ? 'bg-emerald-600 text-white shadow-xl scale-105' : 'text-slate-600 hover:text-slate-400'}`}>
+                  {t === 'note' ? 'Lecture' : t === 'exam' ? 'Exam' : 'Resource'}
                 </button>
               ))}
             </div>
-            <form onSubmit={handleManualAdd} className="space-y-5">
-              <input required type="text" value={newNote.title} onChange={e => setNewNote({...newNote, title: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-2xl px-6 py-4 text-sm focus:border-emerald-500 font-bold" placeholder="タイトル" />
+
+            <form onSubmit={handleManualAdd} className="space-y-6 text-left">
+              <input required type="text" value={newNote.title} onChange={e => setNewNote({...newNote, title: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[20px] px-6 py-5 text-sm focus:border-emerald-500 font-bold placeholder:text-slate-700" placeholder="Entry Title" />
+              
               {newItemType === 'exam' && (
-                <div className="grid grid-cols-3 gap-3">
-                  <select value={examMeta.grade} onChange={e => setExamMeta({...examMeta, grade: e.target.value})} className="bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 text-xs font-bold transition-all"><option value="1年">1年</option><option value="2年">2年</option><option value="3年">3年</option><option value="4年">4年</option><option value="5年">5年</option></select>
-                  <select value={examMeta.term} onChange={e => setExamMeta({...examMeta, term: e.target.value})} className="bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 text-xs font-bold transition-all"><option value="前期">前期</option><option value="後期">後期</option></select>
-                  <select value={examMeta.type} onChange={e => setExamMeta({...examMeta, type: e.target.value})} className="bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 text-xs font-bold transition-all"><option value="中間">中間</option><option value="期末">期末</option><option value="小テスト">小テスト</option></select>
+                <div className="grid grid-cols-3 gap-4">
+                  <select value={examMeta.grade} onChange={e => setExamMeta({...examMeta, grade: e.target.value})} className="bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-4 text-xs font-black uppercase tracking-widest transition-all"><option value="1年">1st</option><option value="2年">2nd</option><option value="3年">3rd</option><option value="4年">4th</option><option value="5年">5th</option></select>
+                  <select value={examMeta.term} onChange={e => setExamMeta({...examMeta, term: e.target.value})} className="bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-4 text-xs font-black uppercase tracking-widest transition-all"><option value="前期">Pre</option><option value="後期">Post</option></select>
+                  <select value={examMeta.type} onChange={e => setExamMeta({...examMeta, type: e.target.value})} className="bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-4 text-xs font-black uppercase tracking-widest transition-all"><option value="中間">Mid</option><option value="期末">Final</option><option value="小テスト">Mini</option></select>
                 </div>
               )}
-              <input required type="text" value={newNote.subject} onChange={e => setNewNote({...newNote, subject: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-2xl px-6 py-4 text-sm focus:border-emerald-500 font-bold" placeholder="科目名" />
-              <textarea value={newNote.preview} onChange={e => setNewNote({...newNote, preview: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-2xl px-6 py-4 text-sm h-32 resize-none focus:border-emerald-500 font-medium" placeholder="内容の要約や抜粋..." />
-              <div className="flex gap-4 pt-6">
-                <button type="button" onClick={() => setIsAddModalOpen(false)} className="flex-1 bg-[#161f33] text-slate-500 py-4 rounded-2xl font-black border border-slate-700 text-xs tracking-widest">CANCEL</button>
-                <button type="submit" disabled={isAdding} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-black shadow-xl active:scale-95 flex items-center justify-center text-xs tracking-widest">
-                  {isAdding ? <Loader2 className="w-5 h-5 animate-spin" /> : 'SAVE'}
+
+              <input required type="text" value={newNote.subject} onChange={e => setNewNote({...newNote, subject: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[20px] px-6 py-5 text-sm focus:border-emerald-500 font-bold placeholder:text-slate-700" placeholder="Subject Name" />
+              <textarea value={newNote.preview} onChange={e => setNewNote({...newNote, preview: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[20px] px-6 py-5 text-sm h-40 resize-none focus:border-emerald-500 font-medium leading-relaxed placeholder:text-slate-700" placeholder="Content details..." />
+              
+              <div className="flex gap-4 pt-8">
+                <button type="button" onClick={() => setIsAddModalOpen(false)} className="flex-1 bg-[#161f33] text-slate-600 py-5 rounded-[24px] font-black border border-slate-700 text-[10px] uppercase tracking-[0.2em] hover:bg-slate-800 transition-all">Cancel</button>
+                <button type="submit" disabled={isAdding} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-5 rounded-[24px] font-black shadow-2xl active:scale-95 flex items-center justify-center text-[10px] uppercase tracking-[0.2em]">
+                  {isAdding ? <Loader2 className="w-6 h-6 animate-spin" /> : 'Push to DB'}
                 </button>
               </div>
             </form>
@@ -570,22 +576,22 @@ export default function App() {
         </div>
       )}
 
-      {/* 4. カレンダー追加 */}
+      {/* --- 4. カレンダー予定追加モーダル --- */}
       {isEventModalOpen && (
         <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsEventModalOpen(false)}>
-          <div className="bg-[#0d1424] border border-slate-700 rounded-[32px] p-8 w-full max-w-sm shadow-2xl relative animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
-            <h2 className="text-xl font-black text-white mb-6 flex items-center uppercase tracking-tight"><CalendarIcon className="w-5 h-5 mr-3 text-emerald-500" /> Add Event</h2>
-            <p className="text-[10px] text-slate-500 mb-6 font-mono font-black tracking-widest uppercase">{selectedDate}</p>
+          <div className="bg-[#0d1424] border border-slate-700 rounded-[40px] p-10 w-full max-w-sm shadow-2xl relative animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+            <h2 className="text-2xl font-black text-white mb-8 flex items-center uppercase tracking-tighter leading-none"><CalendarIcon className="w-7 h-7 mr-4 text-emerald-500" /> New Event</h2>
+            <p className="text-[10px] text-slate-600 mb-8 font-mono font-black tracking-widest uppercase leading-none border-l-2 border-emerald-500 pl-4">{selectedDate}</p>
             <form onSubmit={(e) => {
               e.preventDefault();
               if (!newEventTitle.trim()) return;
               setEvents(prev => ({ ...prev, [selectedDate]: [...(prev[selectedDate] || []), { id: Date.now(), title: newEventTitle.trim() }] }));
               setNewEventTitle(''); setIsEventModalOpen(false);
-            }} className="space-y-5">
-              <input type="text" autoFocus required value={newEventTitle} onChange={e => setNewEventTitle(e.target.value)} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-2xl px-6 py-4 text-sm focus:border-emerald-500 shadow-inner font-bold" placeholder="予定内容" />
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setIsEventModalOpen(false)} className="flex-1 bg-[#161f33] text-slate-500 py-3.5 rounded-xl font-black border border-slate-700 text-[10px] uppercase">Back</button>
-                <button type="submit" className="flex-1 bg-emerald-600 text-white py-3.5 rounded-xl font-black text-[10px] uppercase shadow-lg">Save</button>
+            }} className="space-y-6 text-left">
+              <input type="text" autoFocus required value={newEventTitle} onChange={e => setNewEventTitle(e.target.value)} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[20px] px-6 py-5 text-sm focus:border-emerald-500 shadow-inner font-bold placeholder:text-slate-700" placeholder="Title" />
+              <div className="flex gap-4 pt-4">
+                <button type="button" onClick={() => setIsEventModalOpen(false)} className="flex-1 bg-[#161f33] text-slate-600 py-4 rounded-2xl font-black border border-slate-700 text-[10px] uppercase">Back</button>
+                <button type="submit" className="flex-1 bg-emerald-600 text-white py-4 rounded-2xl font-black text-[10px] uppercase shadow-lg">Save</button>
               </div>
             </form>
           </div>
@@ -593,128 +599,131 @@ export default function App() {
       )}
 
       {/* サイドバー */}
-      <aside className="w-64 bg-[#0d1424] border-r border-slate-800 flex flex-col hidden md:flex z-20 shrink-0">
-        <div className="h-20 flex items-center px-8 border-b border-slate-800 shrink-0">
-          <GraduationCap className="w-9 h-9 text-emerald-500 mr-4" />
-          <h1 className="text-xl font-black text-white tracking-widest uppercase leading-none">KOSEN-base</h1>
+      <aside className="w-72 bg-[#0d1424] border-r border-slate-800 flex flex-col hidden md:flex z-20 shrink-0 shadow-2xl">
+        <div className="h-24 flex items-center px-10 border-b border-slate-800 shrink-0">
+          <GraduationCap className="w-10 h-10 text-emerald-500 mr-5" />
+          <h1 className="text-2xl font-black text-white tracking-[0.1em] uppercase leading-none tracking-tighter">KOSEN-base</h1>
         </div>
-        <nav className="flex-1 py-10 px-6 space-y-2 overflow-y-auto scrollbar-hide">
+        <nav className="flex-1 py-12 px-8 space-y-3 overflow-y-auto scrollbar-hide text-left">
           {menuItems.map((item) => (
-            <button key={item.id} onClick={() => { setActiveView(item.id); setSelectedSubject(null); }} className={`w-full flex items-center px-5 py-4 rounded-2xl transition-all duration-300 ${activeView === item.id ? 'bg-emerald-600/10 text-emerald-400 border border-emerald-500/20 shadow-lg' : 'text-slate-500 hover:bg-slate-800/50 hover:text-slate-200'}`}>
-              <item.icon className={`w-5 h-5 mr-4 ${activeView === item.id ? 'text-emerald-400' : ''}`} /><span className="font-black text-[11px] uppercase tracking-[0.1em]">{item.label}</span>
+            <button key={item.id} onClick={() => { setActiveView(item.id); setSelectedSubject(null); }} className={`w-full flex items-center px-6 py-5 rounded-[24px] transition-all duration-300 ${activeView === item.id ? 'bg-emerald-600/10 text-emerald-400 border border-emerald-500/20 shadow-xl' : 'text-slate-600 hover:bg-slate-800/50 hover:text-slate-300 hover:translate-x-1'}`}>
+              <item.icon className={`w-6 h-6 mr-5 ${activeView === item.id ? 'text-emerald-400' : ''}`} /><span className="font-black text-[11px] uppercase tracking-[0.2em]">{item.label}</span>
             </button>
           ))}
         </nav>
-        <div className="p-6 border-t border-slate-800 shrink-0">
-          <button onClick={() => { setActiveView('settings'); setSelectedSubject(null); }} className={`w-full flex items-center px-5 py-3 text-[11px] font-black uppercase tracking-widest transition-all group mb-4 rounded-xl ${activeView === 'settings' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800/50'}`}>
-            <Settings className="w-4 h-4 mr-4 group-hover:rotate-90 transition-transform duration-500" />SETTING
+        <div className="p-8 border-t border-slate-800 shrink-0">
+          <button onClick={() => { setActiveView('settings'); setSelectedSubject(null); }} className={`w-full flex items-center px-6 py-4 text-[11px] font-black uppercase tracking-widest transition-all group mb-6 rounded-2xl ${activeView === 'settings' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:text-slate-300 hover:bg-slate-800/50'}`}>
+            <Settings className="w-5 h-5 mr-5 group-hover:rotate-180 transition-transform duration-1000" />SETTING
           </button>
-          <div onClick={handleSignOut} className="flex items-center px-4 py-4 rounded-[24px] bg-[#161f33]/30 border border-slate-800 hover:bg-slate-800/50 hover:border-slate-700 cursor-pointer transition-all group overflow-hidden shadow-sm">
-            <div className="w-10 h-10 rounded-full bg-emerald-600 flex items-center justify-center text-white font-black mr-4 shadow-lg border border-emerald-400/20 uppercase shrink-0 text-xs">{session.user.user_metadata?.kosen ? session.user.user_metadata.kosen[0] : 'U'}</div>
+          <div onClick={handleSignOut} className="flex items-center px-5 py-5 rounded-[32px] bg-[#161f33]/30 border border-slate-800 hover:bg-slate-800/50 hover:border-slate-700 cursor-pointer transition-all group overflow-hidden shadow-sm">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-600 flex items-center justify-center text-white font-black mr-5 shadow-xl border border-emerald-400/20 uppercase shrink-0 text-sm leading-none">{session.user.user_metadata?.kosen ? session.user.user_metadata.kosen[0] : 'U'}</div>
             <div className="overflow-hidden flex-1 text-left">
-              <p className="text-xs font-black text-slate-100 truncate tracking-tight">{session.user.user_metadata?.kosen ? `${session.user.user_metadata.kosen}高専` : 'USER'}</p>
-              <p className="text-[9px] text-slate-600 font-mono font-black group-hover:text-red-400 truncate mt-0.5 tracking-tighter uppercase">{session.user.user_metadata?.grade || 'N/A'} / {session.user.user_metadata?.department || 'N/A'}</p>
+              <p className="text-xs font-black text-slate-100 truncate tracking-tight uppercase leading-none mb-1.5">{session.user.user_metadata?.kosen ? `${session.user.user_metadata.kosen}` : 'USER'}</p>
+              <p className="text-[9px] text-slate-600 font-mono font-black group-hover:text-red-400 truncate tracking-tighter uppercase leading-none">{session.user.user_metadata?.grade || 'N/A'} / {session.user.user_metadata?.department || 'N/A'}</p>
             </div>
-            <LogOut className="w-4 h-4 text-slate-700 group-hover:text-red-400 transition-colors ml-2 shrink-0" />
+            <LogOut className="w-5 h-5 text-slate-700 group-hover:text-red-400 transition-colors ml-3 shrink-0" />
           </div>
-          <p className="text-[9px] text-slate-800 mt-6 text-center font-mono font-black tracking-[0.3em] uppercase opacity-40">VER 1.2.0 FINAL</p>
+          <p className="text-[9px] text-slate-800 mt-10 text-center font-mono font-black tracking-[0.4em] uppercase opacity-30">VER 1.2.1 RELOADED</p>
         </div>
       </aside>
 
       {/* メインエリア */}
       <main className="flex-1 flex flex-col min-w-0 bg-[#0a0f18] overflow-hidden relative z-20 text-left">
-        <header className="h-20 flex items-center justify-between px-10 border-b border-slate-800 bg-[#0d1424]/80 backdrop-blur-xl shrink-0">
+        <header className="h-24 flex items-center justify-between px-12 border-b border-slate-800 bg-[#0d1424]/80 backdrop-blur-2xl shrink-0">
           <div className="flex-1 max-w-2xl relative group text-left">
-            <Search className="w-5 h-5 absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-600 group-focus-within:text-emerald-500 transition-colors" />
-            <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search records or tags..." className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[18px] pl-12 pr-6 py-3.5 focus:outline-none focus:border-emerald-500 transition-all text-sm font-bold shadow-inner" />
+            <Search className="w-6 h-6 absolute left-5 top-1/2 transform -translate-y-1/2 text-slate-700 group-focus-within:text-emerald-500 transition-colors" />
+            <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search records, tags, subjects..." className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[24px] pl-14 pr-8 py-4 focus:outline-none focus:border-emerald-500 transition-all text-sm font-black shadow-inner placeholder:text-slate-800" />
           </div>
-          <div className="ml-8 flex items-center gap-4 shrink-0">
+          <div className="ml-10 flex items-center gap-5 shrink-0">
             <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
-            <button onClick={() => fileInputRef.current?.click()} disabled={isAnalyzing} className="flex items-center bg-[#161f33] hover:bg-slate-700 text-slate-300 border border-slate-700 px-6 py-3.5 rounded-[18px] font-black transition-all disabled:opacity-50 text-[10px] uppercase tracking-widest shadow-lg active:scale-95 group">
-              {isAnalyzing ? <Loader2 className="w-4 h-4 mr-3 animate-spin text-emerald-500" /> : <ImagePlus className="w-4 h-4 mr-3 text-emerald-500 group-hover:scale-110 transition-transform" />} 
-              Image Scan
+            <button onClick={() => fileInputRef.current?.click()} disabled={isAnalyzing} className="flex items-center bg-[#161f33] hover:bg-slate-700 text-slate-400 border border-slate-700 px-7 py-4 rounded-[20px] font-black transition-all disabled:opacity-50 text-[10px] uppercase tracking-widest shadow-2xl active:scale-95 group">
+              {isAnalyzing ? <Loader2 className="w-5 h-5 mr-3 animate-spin text-emerald-500" /> : <ImagePlus className="w-5 h-5 mr-3 text-emerald-500 group-hover:rotate-12 transition-transform" />} 
+              Analyze
             </button>
-            <button onClick={() => setIsAddModalOpen(true)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-3.5 rounded-[18px] font-black transition-all shadow-2xl shadow-emerald-900/40 active:scale-95 text-[10px] uppercase tracking-widest flex items-center"><Plus className="w-4 h-4 mr-2" /> New Entry</button>
+            <button onClick={() => setIsAddModalOpen(true)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-9 py-4 rounded-[20px] font-black transition-all shadow-[0_0_24px_rgba(16,185,129,0.3)] active:scale-95 text-[10px] uppercase tracking-widest flex items-center leading-none"><Plus className="w-5 h-5 mr-2.5" /> Create</button>
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-10 scrollbar-hide text-left">
+        <div className="flex-1 overflow-y-auto p-12 scrollbar-hide text-left">
           {analyzeMessage.text && (
-            <div className="mb-8 animate-in slide-in-from-top duration-300">
-              <div className={`border px-6 py-5 rounded-3xl flex items-center shadow-2xl backdrop-blur-md ${analyzeMessage.type === 'error' ? 'bg-red-950/80 border-red-800 text-red-200' : 'bg-emerald-950/80 border-emerald-800 text-emerald-200'}`}>
-                {analyzeMessage.type === 'error' ? <AlertCircle className="w-6 h-6 mr-4 shrink-0 text-red-400" /> : <CheckCircle2 className="w-6 h-6 mr-4 shrink-0 text-emerald-400" />}
-                <p className="flex-1 text-sm font-black tracking-tight text-left">{analyzeMessage.text}</p>
-                <button onClick={() => setAnalyzeMessage({type: null, text: null})} className="ml-6 text-[10px] font-black uppercase tracking-widest hover:underline opacity-50">Dismiss</button>
+            <div className="mb-10 animate-in slide-in-from-top duration-500">
+              <div className={`border px-7 py-6 rounded-[32px] flex items-center shadow-2xl backdrop-blur-md ${analyzeMessage.type === 'error' ? 'bg-red-950/80 border-red-800 text-red-200' : 'bg-emerald-950/80 border-emerald-800 text-emerald-200'}`}>
+                {analyzeMessage.type === 'error' ? <AlertCircle className="w-7 h-7 mr-5 shrink-0 text-red-400" /> : <CheckCircle2 className="w-7 h-7 mr-5 shrink-0 text-emerald-400" />}
+                <p className="flex-1 text-sm font-black tracking-tight text-left leading-relaxed">{analyzeMessage.text}</p>
+                <button onClick={() => setAnalyzeMessage({type: null, text: null})} className="ml-8 text-[11px] font-black uppercase tracking-[0.2em] hover:underline opacity-40">Close</button>
               </div>
             </div>
           )}
           
+          {/* --- DASHBOARD VIEW --- */}
           {activeView === 'dashboard' && (
-            <div className="max-w-7xl mx-auto animate-in fade-in duration-500">
-              <h2 className="text-2xl font-black text-white flex items-center mb-10 tracking-tight text-left leading-none uppercase tracking-widest"><LayoutDashboard className="w-7 h-7 mr-4 text-emerald-500" /> Recent Activity</h2>
+            <div className="max-w-7xl mx-auto animate-in fade-in duration-700">
+              <h2 className="text-3xl font-black text-white flex items-center mb-12 tracking-tighter text-left leading-none uppercase tracking-[0.1em]"><LayoutDashboard className="w-8 h-8 mr-5 text-emerald-500" /> Latest Activity</h2>
               {isLoading ? (
-                <div className="flex flex-col items-center justify-center h-96"><Loader2 className="w-12 h-12 animate-spin text-emerald-500" /></div>
+                <div className="flex flex-col items-center justify-center h-[50vh]"><Loader2 className="w-16 h-16 animate-spin text-emerald-500" /></div>
               ) : filteredItems.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-96 border-2 border-dashed border-slate-800 rounded-[40px] text-slate-700">
-                  <Search className="w-16 h-16 mb-6 opacity-5" />
-                  <p className="font-black uppercase tracking-[0.4em] text-xs">No Records Found</p>
+                <div className="flex flex-col items-center justify-center h-[50vh] border-2 border-dashed border-slate-800 rounded-[56px] text-slate-800 group transition-colors hover:border-emerald-500/20">
+                  <Search className="w-20 h-20 mb-8 opacity-5 group-hover:opacity-10 transition-opacity" />
+                  <p className="font-black uppercase tracking-[0.5em] text-[10px]">No Data Streams Found</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">{filteredItems.slice(0, 12).map(renderCard)}</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">{filteredItems.slice(0, 12).map(renderCard)}</div>
               )}
             </div>
           )}
 
+          {/* --- NOTES VIEW --- */}
           {activeView === 'notes' && (
-            <div className="max-w-7xl mx-auto animate-in slide-in-from-bottom duration-500">
+            <div className="max-w-7xl mx-auto animate-in slide-in-from-bottom duration-700">
               {!selectedSubject ? (
-                <div className="text-center py-12">
-                  <div className="w-28 h-28 bg-emerald-500/10 rounded-[36px] flex items-center justify-center mx-auto mb-10 border border-emerald-500/20 shadow-inner"><BookOpen className="w-14 h-14 text-emerald-500" /></div>
-                  <h2 className="text-4xl font-black text-white mb-4 tracking-tighter uppercase">My Lecture Notes</h2>
-                  <p className="text-slate-500 mb-16 font-bold tracking-tight uppercase tracking-widest opacity-60">Organized by Subject Folders</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto text-left">
+                <div className="text-center py-16">
+                  <div className="w-32 h-32 bg-emerald-500/10 rounded-[48px] flex items-center justify-center mx-auto mb-12 border border-emerald-500/20 shadow-2xl"><BookOpen className="w-16 h-16 text-emerald-500" /></div>
+                  <h2 className="text-5xl font-black text-white mb-4 tracking-tighter uppercase leading-none">Note Archives</h2>
+                  <p className="text-slate-600 mb-20 font-black tracking-[0.2em] uppercase text-xs opacity-50">Lecture streams grouped by subject</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto text-left">
                     {Array.from(new Set(filteredItems.filter(n => getItemType(n.tags) === 'note').map(n => n.subject))).map(sub => (
-                      <div key={sub} onClick={() => setSelectedSubject(sub)} className="p-8 bg-[#0d1424] border border-slate-800 rounded-[32px] hover:border-emerald-500/40 hover:bg-[#162136] transition-all flex items-center justify-between cursor-pointer group shadow-2xl relative text-left">
+                      <div key={sub} onClick={() => setSelectedSubject(sub)} className="p-10 bg-[#0d1424] border border-slate-800 rounded-[40px] hover:border-emerald-500/40 hover:bg-[#162136] transition-all duration-500 flex items-center justify-between cursor-pointer group shadow-2xl text-left relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-3xl rounded-full transition-all group-hover:bg-emerald-500/10"></div>
                         <div className="flex items-center relative z-10">
-                          <div className="w-14 h-14 bg-slate-800 rounded-2xl flex items-center justify-center mr-6 group-hover:bg-emerald-600 transition-all duration-500"><FileText className="w-7 h-7 text-white" /></div>
+                          <div className="w-16 h-16 bg-slate-800 rounded-3xl flex items-center justify-center mr-8 group-hover:bg-emerald-600 transition-all duration-700 shadow-xl shrink-0"><FileText className="w-8 h-8 text-white" /></div>
                           <div>
-                            <p className="font-black text-slate-100 text-xl tracking-tight leading-none mb-2">{sub || 'Uncategorized'}</p>
-                            <p className="text-[10px] text-slate-600 font-black uppercase tracking-widest">{filteredItems.filter(n => n.subject === sub && getItemType(n.tags)==='note').length} Notes</p>
+                            <p className="font-black text-slate-100 text-2xl tracking-tighter leading-none mb-3">{sub || 'Global'}</p>
+                            <p className="text-[10px] text-slate-600 font-black uppercase tracking-[0.3em] leading-none">{filteredItems.filter(n => n.subject === sub && getItemType(n.tags)==='note').length} Records</p>
                           </div>
                         </div>
-                        <ChevronRight className="w-6 h-6 text-slate-700 group-hover:text-emerald-500 transform group-hover:translate-x-2 transition-all" />
+                        <ChevronRight className="w-7 h-7 text-slate-800 group-hover:text-emerald-500 transform group-hover:translate-x-3 transition-all shrink-0" />
                       </div>
                     ))}
                   </div>
                 </div>
               ) : (
-                <div className="animate-in fade-in duration-500 text-left">
-                  <button onClick={() => setSelectedSubject(null)} className="flex items-center text-slate-600 hover:text-emerald-400 font-black text-xs mb-10 transition-all uppercase tracking-widest"><ArrowLeft className="w-5 h-5 mr-3" /> Back to Folders</button>
-                  <h2 className="text-3xl font-black text-white mb-10 border-l-8 border-emerald-500 pl-8 leading-none uppercase">{selectedSubject} Notes</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">{filteredItems.filter(n => n.subject === selectedSubject && getItemType(n.tags)==='note').map(renderCard)}</div>
+                <div className="animate-in fade-in duration-700 text-left">
+                  <button onClick={() => setSelectedSubject(null)} className="flex items-center text-slate-600 hover:text-emerald-400 font-black text-xs mb-12 transition-all uppercase tracking-[0.3em] leading-none group"><ArrowLeft className="w-6 h-6 mr-4 group-hover:-translate-x-3 transition-all" /> Return to Root</button>
+                  <h2 className="text-4xl font-black text-white mb-12 border-l-[12px] border-emerald-500 pl-10 leading-none uppercase tracking-tighter">{selectedSubject} Stream</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">{filteredItems.filter(n => n.subject === selectedSubject && getItemType(n.tags)==='note').map(renderCard)}</div>
                 </div>
               )}
             </div>
           )}
 
           {activeView === 'exams' && (
-            <div className="max-w-7xl mx-auto animate-in slide-in-from-bottom duration-500 text-left">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-12 gap-6">
-                <h2 className="text-3xl font-black text-white flex items-center tracking-tight leading-none uppercase"><FileText className="w-8 h-8 mr-4 text-red-500" /> Exam Archive</h2>
-                <div className="flex bg-[#161f33] border border-slate-700 rounded-3xl p-2 shadow-2xl min-w-[360px]">
-                  <div className="flex items-center px-4 border-r border-slate-700 text-slate-500"><Filter className="w-4 h-4" /></div>
-                  <select value={examFilter.grade} onChange={e => setExamFilter({...examFilter, grade: e.target.value})} className="bg-transparent text-slate-300 text-[10px] font-black uppercase px-4 py-2 outline-none cursor-pointer hover:text-white transition-colors flex-1">
-                    <option value="">Grade</option><option value="1年">1年</option><option value="2年">2年</option><option value="3年">3年</option><option value="4年">4年</option><option value="5年">5年</option>
+            <div className="max-w-7xl mx-auto animate-in slide-in-from-bottom duration-700 text-left">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-16 gap-8 text-left leading-none">
+                <h2 className="text-4xl font-black text-white flex items-center tracking-tighter uppercase leading-none"><FileText className="w-10 h-10 mr-5 text-red-500" /> Exam Core</h2>
+                <div className="flex bg-[#161f33] border border-slate-700 rounded-[28px] p-2 shadow-2xl min-w-[420px] shadow-black/50">
+                  <div className="flex items-center px-5 border-r border-slate-700 text-slate-600"><Filter className="w-5 h-5" /></div>
+                  <select value={examFilter.grade} onChange={e => setExamFilter({...examFilter, grade: e.target.value})} className="bg-transparent text-slate-400 text-[11px] font-black uppercase px-5 py-3 outline-none cursor-pointer flex-1 transition-all hover:text-white">
+                    <option value="">Year</option><option value="1年">1st</option><option value="2年">2nd</option><option value="3年">3rd</option><option value="4年">4th</option><option value="5年">5th</option>
                   </select>
-                  <select value={examFilter.term} onChange={e => setExamFilter({...examFilter, term: e.target.value})} className="bg-transparent text-slate-300 text-[10px] font-black uppercase px-4 py-2 outline-none cursor-pointer border-l border-slate-700 hover:text-white transition-colors flex-1">
-                    <option value="">Term</option><option value="前期">前期</option><option value="後期">後期</option>
+                  <select value={examFilter.term} onChange={e => setExamFilter({...examFilter, term: e.target.value})} className="bg-transparent text-slate-400 text-[11px] font-black uppercase px-5 py-3 outline-none cursor-pointer border-l border-slate-700 flex-1 transition-all hover:text-white">
+                    <option value="">Term</option><option value="前期">Pre</option><option value="後期">Post</option>
                   </select>
-                  <select value={examFilter.type} onChange={e => setExamFilter({...examFilter, type: e.target.value})} className="bg-transparent text-slate-300 text-[10px] font-black uppercase px-4 py-2 outline-none cursor-pointer border-l border-slate-700 hover:text-white transition-colors flex-1">
-                    <option value="">Exam</option><option value="中間">中間</option><option value="期末">期末</option><option value="小テスト">小テスト</option>
+                  <select value={examFilter.type} onChange={e => setExamFilter({...examFilter, type: e.target.value})} className="bg-transparent text-slate-400 text-[11px] font-black uppercase px-5 py-3 outline-none cursor-pointer border-l border-slate-700 flex-1 transition-all hover:text-white">
+                    <option value="">Exam</option><option value="中間">Mid</option><option value="期末">Final</option><option value="小テスト">Mini</option>
                   </select>
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
                 {filteredItems.filter(n => {
                   if (getItemType(n.tags) !== 'exam') return false;
                   const m = getExamMeta(n.tags);
@@ -727,21 +736,28 @@ export default function App() {
             </div>
           )}
 
+          {activeView === 'materials' && (
+            <div className="max-w-7xl mx-auto animate-in fade-in duration-700 text-left">
+              <h2 className="text-4xl font-black text-white flex items-center mb-16 tracking-tighter uppercase leading-none"><Bookmark className="w-10 h-10 mr-5 text-blue-500" /> Digital Library</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">{filteredItems.filter(n => getItemType(n.tags) === 'material').map(renderCard)}</div>
+            </div>
+          )}
+
           {activeView === 'calendar' && (
-            <div className="max-w-7xl mx-auto animate-in slide-in-from-top duration-700 text-left">
-              <h2 className="text-3xl font-black text-white flex items-center mb-10 tracking-tight text-left leading-none uppercase"><CalendarIcon className="w-8 h-8 mr-4 text-emerald-500" /> Academic Calendar <span className="ml-6 text-sm text-slate-700 font-mono font-black tracking-[0.2em]">{calendar.year}.{String(calendar.month + 1).padStart(2,'0')}</span></h2>
-              <div className="grid grid-cols-7 gap-px bg-slate-800 rounded-[40px] overflow-hidden border border-slate-800 shadow-2xl">
-                {['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(day => <div key={day} className="bg-[#11192a] py-6 text-center text-[10px] font-black text-slate-600 tracking-[0.3em] uppercase">{day}</div>)}
+            <div className="max-w-7xl mx-auto animate-in slide-in-from-top duration-1000 text-left">
+              <h2 className="text-4xl font-black text-white flex items-center mb-12 tracking-tighter text-left leading-none uppercase"><CalendarIcon className="w-10 h-10 mr-6 text-emerald-500" /> Timeline <span className="ml-8 text-base text-slate-700 font-mono font-black tracking-[0.4em] opacity-40">{calendar.year}.{String(calendar.month + 1).padStart(2,'0')}</span></h2>
+              <div className="grid grid-cols-7 gap-px bg-slate-800 rounded-[56px] overflow-hidden border border-slate-800 shadow-[0_32px_64px_rgba(0,0,0,0.5)]">
+                {['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(day => <div key={day} className="bg-[#11192a] py-8 text-center text-[11px] font-black text-slate-700 tracking-[0.4em] uppercase border-b border-slate-800/50">{day}</div>)}
                 {calendar.days.map((d, i) => (
-                  <div key={i} onClick={() => d && (setSelectedDate(d.dateStr), setIsEventModalOpen(true))} className={`bg-[#0d1424] min-h-[160px] p-5 transition-all relative ${d ? 'hover:bg-slate-800/50 cursor-pointer group/cell' : 'opacity-20 cursor-default'}`}>
+                  <div key={i} onClick={() => d && (setSelectedDate(d.dateStr), setIsEventModalOpen(true))} className={`bg-[#0d1424] min-h-[180px] p-6 transition-all duration-500 relative ${d ? 'hover:bg-slate-800/50 cursor-pointer group/cell' : 'opacity-20 cursor-default shadow-inner'}`}>
                     {d && (
                       <>
-                        <span className={`text-xs font-mono font-black transition-all ${d.dateStr === new Date().toISOString().split('T')[0] ? 'text-emerald-400' : 'text-slate-700'}`}>{d.day}</span>
-                        <div className="mt-5 space-y-2">
+                        <span className={`text-sm font-mono font-black transition-all ${d.dateStr === new Date().toISOString().split('T')[0] ? 'text-emerald-400 bg-emerald-500/10 px-4 py-2 rounded-2xl ring-1 ring-emerald-500/50 shadow-emerald-500/20' : 'text-slate-800'}`}>{d.day}</span>
+                        <div className="mt-8 space-y-3">
                           {events[d.dateStr]?.map(ev => (
-                            <div key={ev.id} className="px-3 py-2 bg-emerald-500/10 border-l-[3px] border-emerald-500 rounded-lg text-[10px] text-emerald-100 font-black flex justify-between items-center transition-all hover:bg-emerald-500/20 group/ev">
-                              <span className="truncate pr-2">{ev.title}</span>
-                              <X onClick={e => { e.stopPropagation(); setEvents(p => ({ ...p, [d.dateStr]: p[d.dateStr].filter(x => x.id !== ev.id) })); }} className="w-3.5 h-3.5 opacity-0 group-hover/ev:opacity-100 text-red-500 hover:scale-125 transition-all" />
+                            <div key={ev.id} className="px-4 py-3 bg-emerald-500/10 border-l-[4px] border-emerald-500 rounded-xl text-[10px] text-emerald-100 font-black flex justify-between items-center transition-all hover:bg-emerald-500/20 group/ev shadow-lg">
+                              <span className="truncate pr-3 uppercase tracking-tighter">{ev.title}</span>
+                              <X onClick={e => { e.stopPropagation(); setEvents(p => ({ ...p, [d.dateStr]: p[d.dateStr].filter(x => x.id !== ev.id) })); }} className="w-4 h-4 opacity-0 group-hover/ev:opacity-100 text-red-500 hover:scale-150 transition-all cursor-pointer" />
                             </div>
                           ))}
                         </div>
@@ -754,22 +770,22 @@ export default function App() {
           )}
 
           {activeView === 'settings' && (
-            <div className="max-w-2xl mx-auto py-10 animate-in fade-in duration-500 text-left">
-              <h2 className="text-3xl font-black text-white mb-12 flex items-center tracking-tight leading-none uppercase"><Settings className="w-8 h-8 mr-4 text-emerald-500" /> System Settings</h2>
-              <div className="bg-[#0d1424] border border-slate-800 rounded-[40px] p-10 shadow-2xl relative overflow-hidden">
-                <form onSubmit={handleUpdateProfile} className="space-y-8">
-                  <div className="space-y-2"><label className="block text-[10px] font-black text-slate-700 uppercase tracking-widest ml-1 text-left">Account Holder</label><input type="text" disabled value={session.user.email} className="w-full bg-[#161f33]/50 border border-slate-800 text-slate-700 rounded-2xl px-6 py-4 text-sm cursor-not-allowed font-mono font-bold" /></div>
-                  <div className="space-y-2"><label className="block text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1 text-left">College Campus</label><input required type="text" value={profileForm.kosen} onChange={e => setProfileForm({...profileForm, kosen: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-2xl px-6 py-4 text-sm focus:border-emerald-500 font-bold transition-all" placeholder="例: 東京高専" /></div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    <div className="space-y-2"><label className="block text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1 text-left">Major Department</label><input required type="text" value={profileForm.department} onChange={e => setProfileForm({...profileForm, department: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-2xl px-6 py-4 text-sm focus:border-emerald-500 font-bold transition-all" placeholder="例: 情報工学科" /></div>
-                    <div className="space-y-2"><label className="block text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1 text-left">Academic Year</label>
-                      <select required value={profileForm.grade} onChange={e => setProfileForm({...profileForm, grade: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-2xl px-6 py-4 text-sm outline-none font-bold">
-                        <option value="1年">1st Year</option><option value="2年">2年</option><option value="3年">3年</option><option value="4年">4年</option><option value="5年">5年</option><option value="専攻科">専攻科</option>
+            <div className="max-w-2xl mx-auto py-16 animate-in fade-in duration-700 text-left">
+              <h2 className="text-4xl font-black text-white mb-16 flex items-center tracking-tighter leading-none uppercase tracking-[0.1em]"><Settings className="w-10 h-10 mr-6 text-emerald-500" /> Preferences</h2>
+              <div className="bg-[#0d1424] border border-slate-800 rounded-[56px] p-14 shadow-[0_48px_96px_rgba(0,0,0,0.6)] relative overflow-hidden text-left border-t-emerald-500/30">
+                <form onSubmit={handleUpdateProfile} className="space-y-10 text-left">
+                  <div className="space-y-3 text-left"><label className="block text-[11px] font-black text-slate-700 uppercase tracking-[0.5em] ml-2 text-left">Account ID</label><input type="text" disabled value={session.user.email} className="w-full bg-[#161f33]/50 border border-slate-800 text-slate-800 rounded-[28px] px-8 py-5 text-sm cursor-not-allowed font-mono font-black tracking-tight" /></div>
+                  <div className="space-y-3 text-left"><label className="block text-[11px] font-black text-slate-500 uppercase tracking-[0.5em] ml-2 text-left">College Campus</label><input required type="text" value={profileForm.kosen} onChange={e => setProfileForm({...profileForm, kosen: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[28px] px-8 py-5 text-sm focus:border-emerald-500 font-black transition-all shadow-inner" placeholder="Technical College" /></div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 text-left">
+                    <div className="space-y-3 text-left"><label className="block text-[11px] font-black text-slate-500 uppercase tracking-[0.5em] ml-2 text-left">Engineering Major</label><input required type="text" value={profileForm.department} onChange={e => setProfileForm({...profileForm, department: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[28px] px-8 py-5 text-sm focus:border-emerald-500 font-black transition-all shadow-inner" placeholder="Department" /></div>
+                    <div className="space-y-3 text-left"><label className="block text-[11px] font-black text-slate-500 uppercase tracking-[0.5em] ml-2 text-left">Current Grade</label>
+                      <select required value={profileForm.grade} onChange={e => setProfileForm({...profileForm, grade: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[28px] px-8 py-5 text-sm outline-none font-black appearance-none transition-all shadow-inner">
+                        <option value="1年">1st Year</option><option value="2年">2nd Year</option><option value="3年">3rd Year</option><option value="4年">4th Year</option><option value="5年">5th Year</option><option value="専攻科">Adv. Course</option>
                       </select>
                     </div>
                   </div>
-                  <div className="pt-10 flex justify-end border-t border-slate-800">
-                    <button type="submit" disabled={isProfileUpdating} className="bg-emerald-600 hover:bg-emerald-500 text-white px-12 py-4 rounded-[24px] font-black transition-all shadow-2xl active:scale-95 flex items-center justify-center min-w-[200px] disabled:opacity-50 uppercase text-[10px] tracking-widest">Update Settings</button>
+                  <div className="pt-12 flex justify-end border-t border-slate-800">
+                    <button type="submit" disabled={isProfileUpdating} className="bg-emerald-600 hover:bg-emerald-500 text-white px-16 py-5 rounded-[32px] font-black transition-all shadow-2xl active:scale-95 flex items-center justify-center min-w-[240px] disabled:opacity-50 uppercase text-[11px] tracking-[0.4em]">Save Identity</button>
                   </div>
                 </form>
               </div>
@@ -779,37 +795,37 @@ export default function App() {
       </main>
 
       {/* 右サイドバー：AIチャット */}
-      <aside className="w-80 bg-[#0d1424] border-l border-slate-800 flex flex-col hidden lg:flex shrink-0 shadow-2xl relative z-20 text-left">
-        <div className="h-20 flex items-center px-8 border-b border-slate-800 bg-[#0d1424] shrink-0">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center mr-5 border border-emerald-500/20 shadow-inner shrink-0 transition-transform hover:rotate-12"><BrainCircuit className="w-6 h-6 text-emerald-400" /></div>
-          <div><h2 className="font-black text-slate-100 text-[11px] tracking-[0.2em] uppercase leading-none">KOSEN AI</h2><div className="flex items-center mt-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500 mr-2 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span><span className="text-[9px] text-emerald-400 font-black uppercase tracking-widest opacity-60">Core Active</span></div></div>
+      <aside className="w-96 bg-[#0d1424] border-l border-slate-800 flex flex-col hidden lg:flex shrink-0 shadow-[0_0_64px_rgba(0,0,0,0.5)] relative z-20 text-left">
+        <div className="h-24 flex items-center px-10 border-b border-slate-800 bg-[#0d1424] shrink-0 text-left">
+          <div className="w-14 h-14 rounded-[20px] bg-emerald-500/10 flex items-center justify-center mr-6 border border-emerald-500/20 shadow-inner shrink-0 transition-all hover:rotate-12 hover:scale-110"><BrainCircuit className="w-7 h-7 text-emerald-400" /></div>
+          <div><h2 className="font-black text-slate-100 text-[12px] tracking-[0.3em] uppercase leading-none mb-1.5">KOSEN AI</h2><div className="flex items-center mt-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 mr-2.5 animate-pulse shadow-[0_0_12px_rgba(16,185,129,0.8)]"></span><span className="text-[10px] text-emerald-500 font-black uppercase tracking-[0.2em] opacity-80">Syncing Intelligence</span></div></div>
         </div>
-        <div className="flex-1 overflow-y-auto p-8 space-y-8 font-sans scrollbar-hide text-left">
+        <div className="flex-1 overflow-y-auto p-10 space-y-10 font-sans scrollbar-hide text-left">
           {chatMessages.map((msg) => (
-            <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in duration-500 text-left`}>
-              <div className={`max-w-[90%] rounded-[24px] p-5 leading-relaxed shadow-xl text-sm whitespace-pre-wrap font-medium text-left ${msg.sender === 'user' ? 'bg-emerald-600 text-white rounded-tr-none' : 'bg-[#161f33] text-slate-200 border border-slate-800 rounded-tl-none border-l-[3px] border-l-emerald-500/50'}`}>{msg.text}</div>
+            <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-500 text-left`}>
+              <div className={`max-w-[95%] rounded-[32px] p-6 leading-relaxed shadow-2xl text-base whitespace-pre-wrap font-medium text-left ${msg.sender === 'user' ? 'bg-emerald-600 text-white rounded-tr-none shadow-emerald-900/30' : 'bg-[#161f33] text-slate-200 border border-slate-800 rounded-tl-none border-l-[5px] border-l-emerald-500 shadow-black/50'}`}>{msg.text}</div>
             </div>
           ))}
           {isChatLoading && (
-            <div className="flex justify-start animate-in fade-in duration-300 text-left">
-              <div className="bg-[#161f33] text-slate-400 border border-slate-800 rounded-[24px] rounded-tl-none p-5 flex flex-col items-start gap-3 shadow-xl">
-                <div className="flex items-center space-x-3"><Loader2 className="w-4 h-4 animate-spin text-emerald-500" /><span className="text-[9px] font-black uppercase tracking-widest text-slate-500">AI Thinking...</span></div>
-                <div className="w-48 h-2 bg-slate-800 rounded-full overflow-hidden relative"><div className="absolute h-full bg-emerald-500/50 animate-[progress_1.5s_ease-in-out_infinite] w-1/2"></div></div>
+            <div className="flex justify-start animate-in fade-in duration-500 text-left">
+              <div className="bg-[#161f33] text-slate-500 border border-slate-800 rounded-[32px] rounded-tl-none p-6 flex flex-col items-start gap-4 shadow-2xl min-w-[200px]">
+                <div className="flex items-center space-x-4"><Loader2 className="w-5 h-5 animate-spin text-emerald-500" /><span className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-600">Cognitive Load...</span></div>
+                <div className="w-56 h-2 bg-slate-800/50 rounded-full overflow-hidden relative shadow-inner"><div className="absolute h-full bg-emerald-500/40 animate-[progress_2s_ease-in-out_infinite] w-2/3"></div></div>
               </div>
             </div>
           )}
           <div ref={chatEndRef} />
         </div>
-        <div className="p-8 border-t border-slate-800 bg-[#0d1424] shrink-0">
+        <div className="p-10 border-t border-slate-800 bg-[#0d1424] shrink-0 text-left">
           <form onSubmit={handleSendMessage} className="relative group text-left">
-            <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="AIに専門的な質問をする..." disabled={isChatLoading} className="w-full bg-[#161f33] border border-slate-800 border-b-[3px] border-b-slate-700 text-xs rounded-2xl pl-6 pr-14 py-4 focus:outline-none focus:border-emerald-500 focus:border-b-emerald-600 transition-all font-bold shadow-inner" />
-            <button type="submit" disabled={isChatLoading || !chatInput.trim()} className="absolute right-3 top-2.5 p-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-500 shadow-lg active:scale-90 transition-all disabled:opacity-30"><Send className="w-4 h-4" /></button>
+            <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Consult the expert AI..." disabled={isChatLoading} className="w-full bg-[#161f33] border border-slate-800 border-b-[4px] border-b-slate-700 text-sm rounded-[24px] pl-7 pr-16 py-5 focus:outline-none focus:border-emerald-500 focus:border-b-emerald-600 transition-all font-black shadow-inner placeholder:text-slate-800" />
+            <button type="submit" disabled={isChatLoading || !chatInput.trim()} className="absolute right-3.5 top-3.5 p-4 bg-emerald-600 text-white rounded-[18px] hover:bg-emerald-500 shadow-2xl active:scale-75 transition-all disabled:opacity-20"><Send className="w-5 h-5" /></button>
           </form>
         </div>
       </aside>
 
       <style>{`
-        @keyframes progress { 0% { left: -50%; } 100% { left: 100%; } }
+        @keyframes progress { 0% { left: -100%; } 100% { left: 100%; } }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
