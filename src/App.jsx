@@ -24,6 +24,7 @@ import {
 
 // =========================================================================
 // 【重要】本番環境（Vercel）で動かすための最終ステップ
+// 以下の1行の先頭にある「// 」を必ず消して保存してください！！
 // =========================================================================
 import { createClient } from '@supabase/supabase-js';
 
@@ -88,7 +89,6 @@ export default function App() {
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   
-  // 手動追加用のステート
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newNote, setNewNote] = useState({ title: '', subject: '', preview: '', tags: '' });
   const [isAdding, setIsAdding] = useState(false);
@@ -223,6 +223,8 @@ export default function App() {
       if (isSupabaseReady) {
         const { error } = await supabase.from('notes').delete().eq('id', id);
         if (error) throw error;
+      } else {
+        throw new Error("Supabaseと接続されていません。");
       }
       setNotes(prev => prev.filter(n => n.id !== id));
       setAnalyzeMessage({ type: 'success', text: 'ノートを削除しました。' });
@@ -242,6 +244,10 @@ export default function App() {
     setAnalyzeMessage({ type: null, text: null });
 
     try {
+      if (!isSupabaseReady) {
+        throw new Error("import { createClient } のコメントアウトが外されていません！本物のDBに保存できません。");
+      }
+
       const base64Data = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result.split(',')[1]);
@@ -251,43 +257,42 @@ export default function App() {
 
       const geminiKey = getEnvVar('VITE_GEMINI_API_KEY');
       if (!geminiKey) {
-        await new Promise(r => setTimeout(r, 1500));
-        setAnalyzeMessage({ type: 'success', text: 'プレビューモード完了' });
-      } else {
-        const targetModel = "gemini-2.5-flash"; 
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${geminiKey}`;
-        
-        const response = await fetch(apiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              role: "user",
-              parts: [
-                { text: "提供された画像から学習ノートの情報を抽出し、JSON形式で返してください。純粋なJSONのみを返してください。\n{\n  \"title\": \"ノートのタイトル\",\n  \"subject\": \"科目名\",\n  \"preview\": \"内容の要約(150文字程度)\",\n  \"tags\": [\"タグ1\", \"タグ2\"]\n}" },
-                { inlineData: { mimeType: file.type, data: base64Data } }
-              ]
-            }]
-          })
-        });
-
-        if (!response.ok) throw new Error(`APIエラー: ${response.status}`);
-        const result = await response.json();
-        let aiText = result.candidates[0].content.parts[0].text;
-        aiText = aiText.replace(/```json/gi, '').replace(/```/g, '').trim();
-        const parsedData = JSON.parse(aiText);
-
-        const { error: insertError } = await supabase.from('notes').insert([{
-          ...parsedData,
-          date: new Date().toISOString().split('T')[0],
-          user_id: session.user.id
-        }]);
-        
-        if (insertError) throw insertError;
-
-        await fetchNotes();
-        setAnalyzeMessage({ type: 'success', text: '画像解析に成功し、あなたのノートとして保存されました！' });
+        throw new Error("VITE_GEMINI_API_KEY が設定されていません。");
       }
+      
+      const targetModel = "gemini-2.5-flash"; 
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${geminiKey}`;
+      
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            role: "user",
+            parts: [
+              { text: "提供された画像から学習ノートの情報を抽出し、JSON形式で返してください。純粋なJSONのみを返してください。\n{\n  \"title\": \"ノートのタイトル\",\n  \"subject\": \"科目名\",\n  \"preview\": \"内容の要約(150文字程度)\",\n  \"tags\": [\"タグ1\", \"タグ2\"]\n}" },
+              { inlineData: { mimeType: file.type, data: base64Data } }
+            ]
+          }]
+        })
+      });
+
+      if (!response.ok) throw new Error(`APIエラー: ${response.status}`);
+      const result = await response.json();
+      let aiText = result.candidates[0].content.parts[0].text;
+      aiText = aiText.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsedData = JSON.parse(aiText);
+
+      const { error: insertError } = await supabase.from('notes').insert([{
+        ...parsedData,
+        date: new Date().toISOString().split('T')[0],
+        user_id: session.user.id
+      }]);
+      
+      if (insertError) throw insertError;
+
+      await fetchNotes();
+      setAnalyzeMessage({ type: 'success', text: '画像解析に成功し、あなたのノートとして保存されました！' });
       setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 5000);
     } catch (err) {
       setAnalyzeMessage({ type: 'error', text: `エラー: ${err.message}` });
@@ -297,7 +302,6 @@ export default function App() {
     }
   };
 
-  // 手動でノートを追加する処理
   const handleManualAdd = async (e) => {
     e.preventDefault();
     if (!newNote.title || !newNote.subject || !session) return;
@@ -306,6 +310,10 @@ export default function App() {
     setAnalyzeMessage({ type: null, text: null });
 
     try {
+      if (!isSupabaseReady) {
+        throw new Error("import { createClient } のコメントアウトが外されていません！本物のDBに保存できません。");
+      }
+
       const parsedTags = newNote.tags.split(',').map(t => t.trim()).filter(Boolean);
       const noteData = {
         title: newNote.title,
@@ -316,10 +324,8 @@ export default function App() {
         user_id: session.user.id
       };
 
-      if (isSupabaseReady) {
-        const { error: insertError } = await supabase.from('notes').insert([noteData]);
-        if (insertError) throw insertError;
-      }
+      const { error: insertError } = await supabase.from('notes').insert([noteData]);
+      if (insertError) throw insertError;
 
       await fetchNotes();
       setAnalyzeMessage({ type: 'success', text: '手動でノートを追加しました！' });
