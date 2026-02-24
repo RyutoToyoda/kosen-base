@@ -18,7 +18,8 @@ import {
   Download,
   Clock,
   ChevronRight,
-  Trash2
+  Trash2,
+  LogOut
 } from 'lucide-react';
 
 // =========================================================================
@@ -47,12 +48,19 @@ if (isSupabaseReady) {
   supabase = createClient(supabaseUrl, supabaseAnonKey);
 } else {
   supabase = {
+    auth: {
+      getSession: () => Promise.resolve({ data: { session: null } }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+      signInWithPassword: () => Promise.resolve({ error: null }),
+      signUp: () => Promise.resolve({ error: null }),
+      signOut: () => Promise.resolve({ error: null }),
+    },
     from: () => ({
       select: () => ({
         order: () => Promise.resolve({ data: [], error: null })
       }),
       insert: () => Promise.resolve({ error: null }),
-      delete: () => ({ eq: () => Promise.resolve({ error: null }) }) // 削除用のモック追加
+      delete: () => ({ eq: () => Promise.resolve({ error: null }) })
     })
   };
 }
@@ -62,13 +70,20 @@ const INITIAL_CHAT = [
 ];
 
 export default function App() {
+  // 認証用のステート
+  const [session, setSession] = useState(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [isAuthSubmitLoading, setIsAuthSubmitLoading] = useState(false);
+
+  // 既存のステート
   const [notes, setNotes] = useState([]);
   const [activeView, setActiveView] = useState('dashboard');
   const [isLoading, setIsLoading] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzeMessage, setAnalyzeMessage] = useState({ type: null, text: null });
-  
-  // 新機能用のステート
   const [searchQuery, setSearchQuery] = useState('');
   const [menuOpenId, setMenuOpenId] = useState(null);
   const [chatMessages, setChatMessages] = useState(INITIAL_CHAT);
@@ -77,6 +92,27 @@ export default function App() {
   
   const fileInputRef = useRef(null);
   const chatEndRef = useRef(null);
+
+  // 🔒 セッション（ログイン状態）の確認
+  useEffect(() => {
+    if (isSupabaseReady) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        setSession(session);
+        setIsAuthLoading(false);
+      });
+
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((_event, session) => {
+        setSession(session);
+      });
+
+      return () => subscription.unsubscribe();
+    } else {
+      // プレビュー時は最初は未ログイン扱いにする
+      setIsAuthLoading(false);
+    }
+  }, []);
 
   // 📝 ノートの取得
   const fetchNotes = async () => {
@@ -108,14 +144,6 @@ export default function App() {
             date: "2026-02-22", 
             preview: "再帰を用いた探索アルゴリズム。最良ケースO(log n)と最悪ケースO(n)の違い、および平衡木の必要性について。C言語でのポインタ操作を含みます。", 
             tags: ["C言語", "演習"] 
-          },
-          { 
-            id: 3, 
-            title: "応用物理 剛体の力学：慣性モーメントの導出と平行軸の定理", 
-            subject: "物理", 
-            date: "2026-02-20", 
-            preview: "円盤および棒の慣性モーメントを積分により導出する過程。平行軸の定理を用いることで、重心を通らない軸周りの回転運動方程式を簡略化する手法について。", 
-            tags: ["剛体", "レポート"] 
           }
         ]);
       }
@@ -126,16 +154,77 @@ export default function App() {
     }
   };
 
+  // ログイン時のみノートを取得する
   useEffect(() => {
-    fetchNotes();
-  }, []);
+    if (session) {
+      fetchNotes();
+    }
+  }, [session]);
 
   // チャットの自動スクロール
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, isChatLoading]);
 
-  // 🔍 検索フィルター機能
+  // --- 認証機能の実装 ---
+  const handleSignUp = async (e) => {
+    e.preventDefault();
+    if (!email || !password) {
+      setAuthError('メールアドレスとパスワードを入力してください。');
+      return;
+    }
+    setIsAuthSubmitLoading(true);
+    setAuthError('');
+    try {
+      if (isSupabaseReady) {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        alert('登録確認メールを送信しました。メール内のリンクをクリックして完了してください。');
+      } else {
+        // プレビュー用のモック登録
+        await new Promise(r => setTimeout(r, 1000));
+        setSession({ user: { email } });
+      }
+    } catch (err) {
+      setAuthError(err.message);
+    } finally {
+      setIsAuthSubmitLoading(false);
+    }
+  };
+
+  const handleSignIn = async (e) => {
+    e.preventDefault();
+    if (!email || !password) {
+      setAuthError('メールアドレスとパスワードを入力してください。');
+      return;
+    }
+    setIsAuthSubmitLoading(true);
+    setAuthError('');
+    try {
+      if (isSupabaseReady) {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      } else {
+        // プレビュー用のモックログイン
+        await new Promise(r => setTimeout(r, 1000));
+        setSession({ user: { email } });
+      }
+    } catch (err) {
+      setAuthError('ログインに失敗しました。メールアドレスとパスワードを確認してください。');
+    } finally {
+      setIsAuthSubmitLoading(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    if (isSupabaseReady) {
+      await supabase.auth.signOut();
+    } else {
+      setSession(null);
+    }
+  };
+  // ---------------------
+
   const filteredNotes = notes.filter(note => {
     const q = searchQuery.toLowerCase();
     return (
@@ -146,23 +235,19 @@ export default function App() {
     );
   });
 
-  // 🗑️ ノートの削除機能
   const deleteNote = async (id) => {
     if (!window.confirm("このノートを完全に削除しますか？")) {
       setMenuOpenId(null);
       return;
     }
-    
     try {
       if (isSupabaseReady) {
         const { error } = await supabase.from('notes').delete().eq('id', id);
         if (error) throw error;
       }
-      
       setNotes(prev => prev.filter(n => n.id !== id));
       setAnalyzeMessage({ type: 'success', text: 'ノートを削除しました。' });
     } catch (err) {
-      console.error("Delete Error:", err);
       setAnalyzeMessage({ type: 'error', text: `削除エラー: ${err.message}` });
     } finally {
       setMenuOpenId(null);
@@ -170,7 +255,6 @@ export default function App() {
     }
   };
 
-  // 📸 画像アップロード & 解析
   const handleImageUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -233,7 +317,6 @@ export default function App() {
     }
   };
 
-  // 🤖 AIチャット送信機能
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!chatInput.trim() || isChatLoading) return;
@@ -247,9 +330,8 @@ export default function App() {
     try {
       const geminiKey = getEnvVar('VITE_GEMINI_API_KEY');
       if (!geminiKey) {
-        // キーがない場合のモック返答
         await new Promise(r => setTimeout(r, 1000));
-        setChatMessages(prev => [...prev, { id: Date.now() + 1, sender: 'ai', text: 'APIキーが設定されていないため、デモモードで動作しています。Vercelで環境変数を設定すると、本物のAIが応答します！' }]);
+        setChatMessages(prev => [...prev, { id: Date.now() + 1, sender: 'ai', text: 'APIキーが設定されていないため、デモモードで動作しています。' }]);
         setIsChatLoading(false);
         return;
       }
@@ -269,14 +351,12 @@ export default function App() {
       });
 
       if (!response.ok) throw new Error("API通信エラー");
-      
       const result = await response.json();
       const aiText = result.candidates[0].content.parts[0].text;
 
       setChatMessages(prev => [...prev, { id: Date.now() + 1, sender: 'ai', text: aiText }]);
     } catch (err) {
-      console.error("Chat Error:", err);
-      setChatMessages(prev => [...prev, { id: Date.now() + 1, sender: 'ai', text: "すみません、エラーが発生しました。時間を置いて再度お試しください。" }]);
+      setChatMessages(prev => [...prev, { id: Date.now() + 1, sender: 'ai', text: "エラーが発生しました。時間を置いて再度お試しください。" }]);
     } finally {
       setIsChatLoading(false);
     }
@@ -289,10 +369,96 @@ export default function App() {
     { id: 'calendar', label: 'カレンダー', icon: CalendarIcon },
   ];
 
+  // -------------------------------------------------------------------------
+  // UIレンダリング部分
+  // -------------------------------------------------------------------------
+
+  // 1. ローディング画面
+  if (isAuthLoading) {
+    return (
+      <div className="flex h-screen w-full bg-[#0a0f18] items-center justify-center">
+        <Loader2 className="w-10 h-10 animate-spin text-emerald-500" />
+      </div>
+    );
+  }
+
+  // 2. ログイン画面
+  if (!session) {
+    return (
+      <div className="flex h-screen w-full bg-[#0a0f18] text-slate-200 font-sans items-center justify-center relative overflow-hidden">
+        {/* 背景の光の装飾 */}
+        <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-emerald-500/10 blur-[100px] rounded-full"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-blue-500/10 blur-[100px] rounded-full"></div>
+        
+        <div className="w-full max-w-md bg-[#0d1424]/90 backdrop-blur-xl border border-slate-800 rounded-3xl p-8 shadow-2xl relative z-10 mx-4">
+          <div className="flex justify-center mb-6">
+            <div className="w-16 h-16 bg-emerald-500/10 rounded-2xl flex items-center justify-center border border-emerald-500/20 shadow-inner">
+              <GraduationCap className="w-8 h-8 text-emerald-500" />
+            </div>
+          </div>
+          <h1 className="text-2xl font-black text-center text-white mb-2 uppercase tracking-widest">KOSEN-base</h1>
+          <p className="text-center text-slate-400 text-xs font-medium mb-8">自分のアカウントでノートを管理しましょう</p>
+          
+          <form className="space-y-5">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest">Email Address</label>
+              <input 
+                type="email" 
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3.5 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm shadow-inner"
+                placeholder="kosen@example.ac.jp"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest">Password</label>
+              <input 
+                type="password" 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3.5 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm shadow-inner"
+                placeholder="••••••••"
+              />
+            </div>
+            
+            {authError && (
+              <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 flex items-start space-x-2">
+                <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
+                <p className="text-red-400 text-xs font-medium leading-relaxed">{authError}</p>
+              </div>
+            )}
+            
+            <div className="flex space-x-3 pt-4">
+              <button 
+                onClick={handleSignIn}
+                disabled={isAuthSubmitLoading}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/20 active:scale-95 flex items-center justify-center disabled:opacity-50"
+              >
+                {isAuthSubmitLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'ログイン'}
+              </button>
+              <button 
+                onClick={handleSignUp}
+                disabled={isAuthSubmitLoading}
+                className="flex-1 bg-[#161f33] hover:bg-slate-700 text-white py-3.5 rounded-xl font-bold transition-all border border-slate-700 active:scale-95 flex items-center justify-center disabled:opacity-50"
+              >
+                新規登録
+              </button>
+            </div>
+          </form>
+          
+          {!isSupabaseReady && (
+             <p className="mt-6 text-center text-[10px] text-emerald-400/80 font-medium">
+               ※プレビューモード：適当な文字を入力してログインボタンを押せます。
+             </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // 3. メイン画面（ログイン後）
   return (
     <div className="flex h-screen w-full bg-[#0a0f18] text-slate-200 font-sans overflow-hidden">
-      
-      {/* 画面全体をクリックしたときにメニューを閉じる透明なオーバーレイ */}
       {menuOpenId && (
         <div className="fixed inset-0 z-10" onClick={() => setMenuOpenId(null)}></div>
       )}
@@ -319,16 +485,29 @@ export default function App() {
             </button>
           ))}
         </nav>
+        
+        {/* ユーザープロフィール & ログアウト */}
         <div className="p-4 border-t border-slate-800">
-          <button className="w-full flex items-center px-4 py-2 text-slate-400 hover:text-slate-200 text-sm transition-colors group">
+          <button className="w-full flex items-center px-4 py-2 text-slate-400 hover:text-slate-200 text-sm transition-colors group mb-2">
             <Settings className="w-4 h-4 mr-3 group-hover:rotate-45 transition-transform" />
             設定
           </button>
-          <div className="mt-4 flex items-center px-2">
-            <div className="w-9 h-9 rounded-full bg-emerald-600 flex items-center justify-center text-white text-xs font-bold mr-3 shadow-md border border-emerald-400/20">高</div>
-            <div className="overflow-hidden">
-              <p className="text-xs font-bold text-slate-100 truncate">高専 太郎</p>
-              <p className="text-[10px] text-slate-500 font-mono tracking-tight text-emerald-500/80">3rd Grade / IT</p>
+          
+          <div 
+            onClick={handleSignOut}
+            className="flex items-center px-3 py-2 rounded-xl hover:bg-slate-800/60 cursor-pointer transition-colors group"
+          >
+            <div className="w-9 h-9 rounded-full bg-emerald-600 flex items-center justify-center text-white text-xs font-bold mr-3 shadow-md border border-emerald-400/20 uppercase">
+              {session.user.email ? session.user.email[0] : 'U'}
+            </div>
+            <div className="overflow-hidden flex-1">
+              <p className="text-xs font-bold text-slate-100 truncate">
+                {session.user.email ? session.user.email.split('@')[0] : 'User'}
+              </p>
+              <p className="text-[10px] text-slate-500 font-mono tracking-tight group-hover:text-red-400 transition-colors flex items-center mt-0.5">
+                <LogOut className="w-3 h-3 mr-1" />
+                Sign Out
+              </p>
             </div>
           </div>
         </div>
@@ -416,7 +595,6 @@ export default function App() {
                           {note.subject}
                         </span>
                         
-                        {/* 削除メニュー */}
                         <div className="relative z-20">
                           <button 
                             onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === note.id ? null : note.id); }}
@@ -591,7 +769,6 @@ export default function App() {
               </div>
             </div>
           ))}
-          {/* ローディング表示 */}
           {isChatLoading && (
             <div className="flex justify-start animate-in fade-in duration-300">
               <div className="bg-[#161f33] text-slate-400 border border-slate-700/50 rounded-2xl rounded-tl-none p-4 flex items-center space-x-2">
@@ -600,7 +777,6 @@ export default function App() {
               </div>
             </div>
           )}
-          {/* 自動スクロールの着地点 */}
           <div ref={chatEndRef} />
         </div>
 
