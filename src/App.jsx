@@ -30,19 +30,18 @@ import {
 // =========================================================================
 import { createClient } from '@supabase/supabase-js';
 
-// Viteのビルドで確実に環境変数が置換されるように、直接プロパティを指定します
-const getSupabaseUrl = () => {
-  try { return import.meta.env.VITE_SUPABASE_URL || ''; } catch (e) { return ''; }
-};
-const getSupabaseAnonKey = () => {
-  try { return import.meta.env.VITE_SUPABASE_ANON_KEY || ''; } catch (e) { return ''; }
-};
-const getGeminiKey = () => {
-  try { return import.meta.env.VITE_GEMINI_API_KEY || ''; } catch (e) { return ''; }
-};
+// Viteのビルドで確実に環境変数が置換されるように、最もシンプルな形で読み込みます
+let supabaseUrl = '';
+let supabaseAnonKey = '';
+let globalGeminiKey = '';
 
-const supabaseUrl = getSupabaseUrl();
-const supabaseAnonKey = getSupabaseAnonKey();
+try {
+  supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+  supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+  globalGeminiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
+} catch (error) {
+  console.log("プレビュー環境のため環境変数をスキップします");
+}
 
 const isCreateClientImported = typeof createClient !== 'undefined';
 const hasEnvVars = !!(supabaseUrl && supabaseAnonKey);
@@ -313,16 +312,15 @@ export default function App() {
     setIsAnalyzing(true); setAnalyzeMessage({ type: null, text: null });
     try {
       if (!isCreateClientImported) throw new Error("コメントアウトが外されていません。");
-      if (!hasEnvVars) throw new Error("環境変数が読み込めていません。");
+      if (!hasEnvVars) throw new Error("環境変数が読み込めていません。VercelでRedeployを行ってください。");
       const base64Data = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result.split(',')[1]);
         reader.onerror = (error) => reject(error);
         reader.readAsDataURL(file);
       });
-      const geminiKey = getGeminiKey();
-      if (!geminiKey) throw new Error("VITE_GEMINI_API_KEY が設定されていません。");
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+      if (!globalGeminiKey) throw new Error("VITE_GEMINI_API_KEY が設定されていません。");
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${globalGeminiKey}`;
       const response = await fetch(apiUrl, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ role: "user", parts: [
@@ -351,13 +349,12 @@ export default function App() {
     setChatMessages(prev => [...prev, { id: Date.now(), sender: 'user', text: userText }]);
     setChatInput(''); setIsChatLoading(true);
     try {
-      const geminiKey = getGeminiKey();
-      if (!geminiKey) {
+      if (!globalGeminiKey) {
         await new Promise(r => setTimeout(r, 1000));
         setChatMessages(prev => [...prev, { id: Date.now() + 1, sender: 'ai', text: 'APIキー未設定のデモモードです。' }]);
         return;
       }
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${globalGeminiKey}`;
       const response = await fetch(apiUrl, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: `あなたは高専生をサポートする優秀なAIアシスタントです。質問: ${userText}` }] }] })
