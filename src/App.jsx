@@ -75,7 +75,7 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
   const [isAuthSubmitLoading, setIsAuthSubmitLoading] = useState(false);
-  const [isLoginMode, setIsLoginMode] = useState(true); // ログインと新規登録の切り替え用
+  const [isLoginMode, setIsLoginMode] = useState(true);
 
   const [notes, setNotes] = useState([]);
   const [activeView, setActiveView] = useState('dashboard');
@@ -87,6 +87,11 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState(INITIAL_CHAT);
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
+  
+  // 手動追加用のステート
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [newNote, setNewNote] = useState({ title: '', subject: '', preview: '', tags: '' });
+  const [isAdding, setIsAdding] = useState(false);
   
   const fileInputRef = useRef(null);
   const chatEndRef = useRef(null);
@@ -123,7 +128,6 @@ export default function App() {
       if (data && data.length > 0) {
         setNotes(data);
       } else {
-        // 仮のデータを完全に削除し、空の配列をセットします
         setNotes([]);
       }
     } catch (err) {
@@ -293,6 +297,42 @@ export default function App() {
     }
   };
 
+  // 手動でノートを追加する処理
+  const handleManualAdd = async (e) => {
+    e.preventDefault();
+    if (!newNote.title || !newNote.subject || !session) return;
+
+    setIsAdding(true);
+    setAnalyzeMessage({ type: null, text: null });
+
+    try {
+      const parsedTags = newNote.tags.split(',').map(t => t.trim()).filter(Boolean);
+      const noteData = {
+        title: newNote.title,
+        subject: newNote.subject,
+        preview: newNote.preview,
+        tags: parsedTags,
+        date: new Date().toISOString().split('T')[0],
+        user_id: session.user.id
+      };
+
+      if (isSupabaseReady) {
+        const { error: insertError } = await supabase.from('notes').insert([noteData]);
+        if (insertError) throw insertError;
+      }
+
+      await fetchNotes();
+      setAnalyzeMessage({ type: 'success', text: '手動でノートを追加しました！' });
+      setIsAddModalOpen(false);
+      setNewNote({ title: '', subject: '', preview: '', tags: '' });
+    } catch (err) {
+      setAnalyzeMessage({ type: 'error', text: `追加エラー: ${err.message}` });
+    } finally {
+      setIsAdding(false);
+      setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 5000);
+    }
+  };
+
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!chatInput.trim() || isChatLoading) return;
@@ -369,7 +409,6 @@ export default function App() {
           <p className="text-center text-slate-400 text-xs font-medium mb-8">自分のアカウントでノートを管理しましょう</p>
           
           <form className="space-y-5">
-            {/* ログイン・新規登録の切り替えタブ */}
             <div className="flex bg-[#161f33] p-1 rounded-xl mb-6">
               <button
                 type="button"
@@ -442,8 +481,81 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-full bg-[#0a0f18] text-slate-200 font-sans overflow-hidden">
+      {/* 画面外クリック検知のオーバーレイ */}
       {menuOpenId && (
         <div className="fixed inset-0 z-10" onClick={() => setMenuOpenId(null)}></div>
+      )}
+
+      {/* 手動追加用のモーダル */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-[#0d1424] border border-slate-700 rounded-3xl p-6 w-full max-w-md shadow-2xl relative animate-in zoom-in-95 duration-200">
+            <h2 className="text-xl font-black text-white mb-6 flex items-center">
+              <Plus className="w-5 h-5 mr-2 text-emerald-500" />
+              手動でノートを追加
+            </h2>
+            <form onSubmit={handleManualAdd} className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest">タイトル (必須)</label>
+                <input 
+                  type="text" 
+                  required 
+                  value={newNote.title} 
+                  onChange={e => setNewNote({...newNote, title: e.target.value})} 
+                  className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm shadow-inner" 
+                  placeholder="線形代数 第1回..." 
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest">科目 (必須)</label>
+                <input 
+                  type="text" 
+                  required 
+                  value={newNote.subject} 
+                  onChange={e => setNewNote({...newNote, subject: e.target.value})} 
+                  className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm shadow-inner" 
+                  placeholder="数学" 
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest">要約 / 内容</label>
+                <textarea 
+                  value={newNote.preview} 
+                  onChange={e => setNewNote({...newNote, preview: e.target.value})} 
+                  className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm shadow-inner h-24 resize-none" 
+                  placeholder="ノートの主な内容を記入..." 
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest">タグ (カンマ区切り)</label>
+                <input 
+                  type="text" 
+                  value={newNote.tags} 
+                  onChange={e => setNewNote({...newNote, tags: e.target.value})} 
+                  className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm shadow-inner" 
+                  placeholder="前期, 課題, 重要..." 
+                />
+              </div>
+              
+              <div className="flex space-x-3 pt-4">
+                <button 
+                  type="button" 
+                  onClick={() => setIsAddModalOpen(false)} 
+                  className="flex-1 bg-[#161f33] hover:bg-slate-700 text-white py-3 rounded-xl font-bold transition-all border border-slate-700 active:scale-95 text-sm"
+                >
+                  キャンセル
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={isAdding} 
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/20 active:scale-95 flex items-center justify-center disabled:opacity-50 text-sm"
+                >
+                  {isAdding ? <Loader2 className="w-5 h-5 animate-spin" /> : '追加する'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* サイドバー */}
@@ -521,7 +633,10 @@ export default function App() {
               {isAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin text-emerald-500" /> : <ImagePlus className="w-4 h-4 mr-2 text-emerald-500" />}
               {isAnalyzing ? '解析中...' : '画像を追加'}
             </button>
-            <button className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold transition-all shadow-lg shadow-emerald-900/20 text-sm flex items-center active:scale-95">
+            <button 
+              onClick={() => setIsAddModalOpen(true)}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold transition-all shadow-lg shadow-emerald-900/20 text-sm flex items-center active:scale-95"
+            >
               <Plus className="w-4 h-4 mr-1" />
               新規
             </button>
@@ -567,7 +682,7 @@ export default function App() {
                 <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-slate-800 rounded-3xl text-slate-500">
                   <Search className="w-12 h-12 mb-4 opacity-20" />
                   <p className="font-bold">まだ自分のノートがありません</p>
-                  <p className="text-xs mt-2">右上のボタンから画像をアップロードしましょう！</p>
+                  <p className="text-xs mt-2">右上のボタンからノートを追加しましょう！</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
