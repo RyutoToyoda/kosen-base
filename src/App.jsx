@@ -75,6 +75,7 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
   const [isAuthSubmitLoading, setIsAuthSubmitLoading] = useState(false);
+  const [isLoginMode, setIsLoginMode] = useState(true); // ログインと新規登録の切り替え用
 
   const [notes, setNotes] = useState([]);
   const [activeView, setActiveView] = useState('dashboard');
@@ -112,7 +113,6 @@ export default function App() {
   const fetchNotes = async () => {
     try {
       setIsLoading(true);
-      // SupabaseのRLS設定により、自動的に「自分のノートだけ」が取得されます
       const { data, error } = await supabase
         .from('notes')
         .select('*')
@@ -123,16 +123,8 @@ export default function App() {
       if (data && data.length > 0) {
         setNotes(data);
       } else {
-        setNotes([
-          { 
-            id: 1, 
-            title: "ようこそ KOSEN-base へ！", 
-            subject: "使い方", 
-            date: new Date().toISOString().split('T')[0], 
-            preview: "右上の「画像を追加」ボタンから、あなたのノートやプリントの画像をアップロードしてください。AIが自動で内容を解析して保存します！", 
-            tags: ["チュートリアル", "はじめに"] 
-          }
-        ]);
+        // 仮のデータを完全に削除し、空の配列をセットします
+        setNotes([]);
       }
     } catch (err) {
       console.error("Fetch Error:", err);
@@ -225,7 +217,6 @@ export default function App() {
     }
     try {
       if (isSupabaseReady) {
-        // 自分のノートのみ削除可能
         const { error } = await supabase.from('notes').delete().eq('id', id);
         if (error) throw error;
       }
@@ -282,11 +273,10 @@ export default function App() {
         aiText = aiText.replace(/```json/gi, '').replace(/```/g, '').trim();
         const parsedData = JSON.parse(aiText);
 
-        // 【重要変更点】保存時に現在ログインしているユーザーのID（session.user.id）を紐付ける
         const { error: insertError } = await supabase.from('notes').insert([{
           ...parsedData,
           date: new Date().toISOString().split('T')[0],
-          user_id: session.user.id // ここで持ち主の印をつける
+          user_id: session.user.id
         }]);
         
         if (insertError) throw insertError;
@@ -379,6 +369,24 @@ export default function App() {
           <p className="text-center text-slate-400 text-xs font-medium mb-8">自分のアカウントでノートを管理しましょう</p>
           
           <form className="space-y-5">
+            {/* ログイン・新規登録の切り替えタブ */}
+            <div className="flex bg-[#161f33] p-1 rounded-xl mb-6">
+              <button
+                type="button"
+                onClick={() => { setIsLoginMode(true); setAuthError(''); }}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${isLoginMode ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                ログイン
+              </button>
+              <button
+                type="button"
+                onClick={() => { setIsLoginMode(false); setAuthError(''); }}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${!isLoginMode ? 'bg-slate-700 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                新規登録
+              </button>
+            </div>
+
             <div>
               <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest">Email Address</label>
               <input 
@@ -407,21 +415,24 @@ export default function App() {
               </div>
             )}
             
-            <div className="flex space-x-3 pt-4">
-              <button 
-                onClick={handleSignIn}
-                disabled={isAuthSubmitLoading}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/20 active:scale-95 flex items-center justify-center disabled:opacity-50"
-              >
-                {isAuthSubmitLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'ログイン'}
-              </button>
-              <button 
-                onClick={handleSignUp}
-                disabled={isAuthSubmitLoading}
-                className="flex-1 bg-[#161f33] hover:bg-slate-700 text-white py-3.5 rounded-xl font-bold transition-all border border-slate-700 active:scale-95 flex items-center justify-center disabled:opacity-50"
-              >
-                新規登録
-              </button>
+            <div className="pt-4">
+              {isLoginMode ? (
+                <button 
+                  onClick={handleSignIn}
+                  disabled={isAuthSubmitLoading}
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/20 active:scale-95 flex items-center justify-center disabled:opacity-50"
+                >
+                  {isAuthSubmitLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'ログイン'}
+                </button>
+              ) : (
+                <button 
+                  onClick={handleSignUp}
+                  disabled={isAuthSubmitLoading}
+                  className="w-full bg-[#161f33] hover:bg-slate-700 text-white py-3.5 rounded-xl font-bold transition-all border border-slate-700 active:scale-95 flex items-center justify-center disabled:opacity-50"
+                >
+                  {isAuthSubmitLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : '新規登録して始める'}
+                </button>
+              )}
             </div>
           </form>
         </div>
@@ -635,7 +646,7 @@ export default function App() {
                       </div>
                       <div>
                         <p className="font-bold text-slate-100 text-lg">{sub}</p>
-                        <p className="text-[10px] text-slate-500 font-mono">12 Items</p>
+                        <p className="text-[10px] text-slate-500 font-mono">-- Items</p>
                       </div>
                     </div>
                     <ChevronRight className="w-5 h-5 text-slate-600 group-hover:text-emerald-500" />
@@ -662,22 +673,11 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/50">
-                    {[
-                      { name: 'R5年度_線形代数_中間試験.pdf', sub: '数学', type: '過去問', color: 'text-red-400 bg-red-400/10' },
-                      { name: '信号処理_第04回講義スライド.pptx', sub: '専門', type: '資料', color: 'text-blue-400 bg-blue-400/10' },
-                      { name: 'TOEIC精選模試_解答解説.pdf', sub: '英語', type: '演習', color: 'text-emerald-400 bg-emerald-400/10' },
-                    ].map((file, i) => (
-                      <tr key={i} className="hover:bg-slate-800/30 transition-all group">
-                        <td className="px-8 py-5 font-bold text-slate-100 group-hover:text-emerald-400 transition-colors">{file.name}</td>
-                        <td className="px-8 py-5 text-slate-400">{file.sub}</td>
-                        <td className="px-8 py-5">
-                          <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-tighter ${file.color}`}>{file.type}</span>
-                        </td>
-                        <td className="px-8 py-5 text-right space-x-2">
-                          <button className="text-slate-500 hover:text-emerald-400 transition-colors p-1.5"><Download className="w-4 h-4" /></button>
-                        </td>
-                      </tr>
-                    ))}
+                    <tr>
+                      <td colSpan="4" className="px-8 py-10 text-center text-slate-500 text-sm font-bold border-none">
+                        まだ資料がありません
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -698,13 +698,7 @@ export default function App() {
                   const dayNum = (i % 31) + 1;
                   return (
                     <div key={i} className="bg-[#0d1424] min-h-[120px] p-3 hover:bg-slate-800/40 transition-all duration-300 group relative">
-                      <span className={`text-[11px] font-mono ${i === 15 ? 'text-white font-bold' : 'text-slate-700'} group-hover:text-slate-400 transition-colors`}>{dayNum}</span>
-                      {i === 15 && (
-                        <div className="mt-2 p-1 bg-red-500/15 border-l-2 border-red-500 rounded text-[9px] text-white font-bold truncate">物理実験レポ</div>
-                      )}
-                      {i === 18 && (
-                        <div className="mt-2 p-1 bg-emerald-500/15 border-l-2 border-emerald-500 rounded text-[9px] text-white font-bold truncate">数学小テスト</div>
-                      )}
+                      <span className={`text-[11px] font-mono text-slate-700 group-hover:text-slate-400 transition-colors`}>{dayNum}</span>
                     </div>
                   );
                 })}
