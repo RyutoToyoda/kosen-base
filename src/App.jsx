@@ -32,9 +32,18 @@ import {
 // =========================================================================
 import { createClient } from '@supabase/supabase-js';
 
-// 一番安定して動作していた読み込み方に修正
+// 一番安定して動作していた読み込み方に修正（＋白画面クラッシュ防止策）
 const getEnvVar = (key) => {
   try {
+    // @ts-ignore - import.metaが存在しない環境でのクラッシュを防ぐ
+    if (typeof import.meta === 'undefined' || !import.meta.env) return '';
+    
+    // Viteでのビルド置換を確実にするため、キーごとに直接アクセス
+    if (key === 'VITE_SUPABASE_URL') return import.meta.env.VITE_SUPABASE_URL || '';
+    if (key === 'VITE_SUPABASE_ANON_KEY') return import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+    if (key === 'VITE_GEMINI_API_KEY') return import.meta.env.VITE_GEMINI_API_KEY || '';
+    
+    // @ts-ignore
     return import.meta.env[key] || '';
   } catch (e) {
     return '';
@@ -860,51 +869,6 @@ export default function App() {
             </div>
           )}
 
-          {activeView === 'settings' && (
-            <div className="max-w-2xl mx-auto py-8 animate-in fade-in duration-500">
-              <h2 className="text-2xl font-black text-white mb-8 flex items-center">
-                <Settings className="w-6 h-6 mr-3 text-emerald-500" />
-                アカウント設定
-              </h2>
-              
-              <div className="bg-[#0d1424] border border-slate-800 rounded-3xl p-8 shadow-2xl">
-                <h3 className="text-lg font-bold text-white mb-6 border-b border-slate-800 pb-4">プロフィール</h3>
-                <form onSubmit={handleUpdateProfile} className="space-y-6">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-widest">メールアドレス</label>
-                    <input type="text" disabled value={session?.user?.email || ''} className="w-full bg-[#161f33]/50 border border-slate-800 text-slate-500 rounded-xl px-4 py-3 text-sm cursor-not-allowed" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-widest">高専名</label>
-                    <input required type="text" value={profileForm.kosen} onChange={e => setProfileForm({...profileForm, kosen: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm shadow-inner" placeholder="例: 東京" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-widest">学科</label>
-                      <input required type="text" value={profileForm.department} onChange={e => setProfileForm({...profileForm, department: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm shadow-inner" placeholder="例: 情報工学科" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-widest">学年</label>
-                      <select required value={profileForm.grade} onChange={e => setProfileForm({...profileForm, grade: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm appearance-none shadow-inner">
-                        <option value="" disabled>選択してください</option>
-                        <option value="1年">1年</option><option value="2年">2年</option><option value="3年">3年</option>
-                        <option value="4年">4年</option><option value="5年">5年</option>
-                        <option value="専攻科1年">専攻科1年</option><option value="専攻科2年">専攻科2年</option>
-                      </select>
-                    </div>
-                  </div>
-                  
-                  <div className="pt-4 flex justify-end">
-                    <button type="submit" disabled={isProfileUpdating} className="bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-3 rounded-xl font-bold transition-all shadow-lg active:scale-95 flex items-center justify-center disabled:opacity-50 text-sm">
-                      {isProfileUpdating ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                      変更を保存
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
-
           {activeView === 'archive' && (
             <div className="max-w-7xl mx-auto animate-in fade-in duration-500">
               <h2 className="text-2xl font-black text-white flex items-center mb-8"><FileText className="w-6 h-6 mr-3 text-emerald-500" />過去問・資料</h2>
@@ -975,6 +939,51 @@ export default function App() {
                     )}
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {activeView === 'settings' && (
+            <div className="max-w-2xl mx-auto py-8 animate-in fade-in duration-500">
+              <h2 className="text-2xl font-black text-white mb-8 flex items-center">
+                <Settings className="w-6 h-6 mr-3 text-emerald-500" />
+                アカウント設定
+              </h2>
+              
+              <div className="bg-[#0d1424] border border-slate-800 rounded-3xl p-8 shadow-2xl">
+                <h3 className="text-lg font-bold text-white mb-6 border-b border-slate-800 pb-4">プロフィール</h3>
+                <form onSubmit={handleUpdateProfile} className="space-y-6">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-widest">メールアドレス</label>
+                    <input type="text" disabled value={session?.user?.email || ''} className="w-full bg-[#161f33]/50 border border-slate-800 text-slate-500 rounded-xl px-4 py-3 text-sm cursor-not-allowed" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-widest">高専名</label>
+                    <input required type="text" value={profileForm.kosen} onChange={e => setProfileForm({...profileForm, kosen: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm shadow-inner" placeholder="例: 東京" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-widest">学科</label>
+                      <input required type="text" value={profileForm.department} onChange={e => setProfileForm({...profileForm, department: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm shadow-inner" placeholder="例: 情報工学科" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-widest">学年</label>
+                      <select required value={profileForm.grade} onChange={e => setProfileForm({...profileForm, grade: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm appearance-none shadow-inner">
+                        <option value="" disabled>選択してください</option>
+                        <option value="1年">1年</option><option value="2年">2年</option><option value="3年">3年</option>
+                        <option value="4年">4年</option><option value="5年">5年</option>
+                        <option value="専攻科1年">専攻科1年</option><option value="専攻科2年">専攻科2年</option>
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <div className="pt-4 flex justify-end">
+                    <button type="submit" disabled={isProfileUpdating} className="bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-3 rounded-xl font-bold transition-all shadow-lg active:scale-95 flex items-center justify-center disabled:opacity-50 text-sm">
+                      {isProfileUpdating ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                      変更を保存
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
           )}
