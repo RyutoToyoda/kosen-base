@@ -22,7 +22,8 @@ import {
   LogOut,
   User,
   ArrowLeft,
-  X
+  X,
+  Compass
 } from 'lucide-react';
 
 // =========================================================================
@@ -98,6 +99,9 @@ export default function App() {
   
   // ノート詳細表示用
   const [selectedNote, setSelectedNote] = useState(null);
+  
+  // AIによる専門分野活用推定用ステート
+  const [relevanceAnalysis, setRelevanceAnalysis] = useState({ loading: false, text: null, error: null });
   
   // 手動追加用
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -367,6 +371,38 @@ export default function App() {
     finally { setIsChatLoading(false); }
   };
 
+  // --- 新規追加：AIで専門分野との関連性を分析する機能 ---
+  const handleAnalyzeRelevance = async (note) => {
+    setRelevanceAnalysis({ loading: true, text: null, error: null });
+    try {
+      if (!globalGeminiKey) throw new Error("VITE_GEMINI_API_KEY が設定されていません。");
+      
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${globalGeminiKey}`;
+      const prompt = `あなたは高専生をサポートするAIです。以下のノートの内容から、この知識が高専の各学科（機械、電気、情報、建築、化学など）において、具体的にどのような専門科目や将来の実務で活用されるか（役立つか）を推定し、高専生がモチベーションを持てるように分かりやすく教えてください。
+
+【ノート情報】
+タイトル: ${note.title}
+科目: ${note.subject}
+内容: ${note.preview}
+タグ: ${note.tags?.join(', ')}
+
+出力形式: 学科ごとの活用例を箇条書きなどで簡潔にまとめてください。`;
+
+      const response = await fetch(apiUrl, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }] })
+      });
+
+      if (!response.ok) throw new Error("API通信エラー");
+      const result = await response.json();
+      const aiText = result.candidates[0].content.parts[0].text;
+
+      setRelevanceAnalysis({ loading: false, text: aiText, error: null });
+    } catch (err) {
+      setRelevanceAnalysis({ loading: false, text: null, error: err.message });
+    }
+  };
+
   // --- ノートのカードUIコンポーネント ---
   const renderNoteCard = (note) => (
     <div 
@@ -476,7 +512,7 @@ export default function App() {
       {selectedNote && (
         <div 
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 sm:p-8 animate-in fade-in duration-300"
-          onClick={() => setSelectedNote(null)}
+          onClick={() => { setSelectedNote(null); setRelevanceAnalysis({ loading: false, text: null, error: null }); }}
         >
           <div 
             className="bg-[#0d1424] border border-slate-700 rounded-3xl p-6 sm:p-10 w-full h-full max-w-5xl shadow-2xl relative flex flex-col animate-in zoom-in-95 duration-300"
@@ -489,15 +525,57 @@ export default function App() {
                 </span>
                 <h2 className="text-2xl sm:text-4xl font-black text-white leading-tight">{selectedNote.title}</h2>
               </div>
-              <button onClick={() => setSelectedNote(null)} className="p-3 bg-slate-800/50 hover:bg-slate-700 rounded-full text-slate-400 hover:text-white transition-colors shrink-0">
+              <button onClick={() => { setSelectedNote(null); setRelevanceAnalysis({ loading: false, text: null, error: null }); }} className="p-3 bg-slate-800/50 hover:bg-slate-700 rounded-full text-slate-400 hover:text-white transition-colors shrink-0">
                  <X className="w-6 h-6" />
               </button>
             </div>
             
-            <div className="flex-1 overflow-y-auto pr-2 scrollbar-hide">
-              <p className="text-slate-300 leading-relaxed whitespace-pre-wrap font-medium text-base sm:text-lg">
-                {selectedNote.preview}
-              </p>
+            <div className="flex-1 overflow-y-auto pr-2 scrollbar-hide space-y-8">
+              <div>
+                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-3 flex items-center">
+                  <FileText className="w-4 h-4 mr-2" /> ノート内容
+                </h3>
+                <p className="text-slate-300 leading-relaxed whitespace-pre-wrap font-medium text-base sm:text-lg">
+                  {selectedNote.preview}
+                </p>
+              </div>
+
+              {/* AIによる専門分野活用推定セクション */}
+              <div className="bg-[#161f33] border border-emerald-500/20 rounded-2xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-widest flex items-center">
+                    <Compass className="w-4 h-4 mr-2" /> 将来の活用分野をAIに聞く
+                  </h3>
+                  {!relevanceAnalysis.text && !relevanceAnalysis.loading && (
+                    <button 
+                      onClick={() => handleAnalyzeRelevance(selectedNote)}
+                      className="text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg transition-colors flex items-center shadow-lg"
+                    >
+                      <BrainCircuit className="w-3.5 h-3.5 mr-1.5" />
+                      AIで分析する
+                    </button>
+                  )}
+                </div>
+
+                {relevanceAnalysis.loading && (
+                  <div className="flex items-center text-slate-400 text-sm py-4">
+                    <Loader2 className="w-5 h-5 animate-spin text-emerald-500 mr-3" />
+                    AIが各学科での活用方法を考えています...
+                  </div>
+                )}
+
+                {relevanceAnalysis.error && (
+                  <div className="text-red-400 text-sm py-2">
+                    エラー: {relevanceAnalysis.error}
+                  </div>
+                )}
+
+                {relevanceAnalysis.text && (
+                  <div className="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap mt-4 animate-in fade-in duration-500 p-4 bg-[#0d1424] rounded-xl border border-slate-800">
+                    {relevanceAnalysis.text}
+                  </div>
+                )}
+              </div>
             </div>
             
             <div className="mt-6 pt-6 border-t border-slate-800/50 flex flex-col sm:flex-row items-start sm:items-center justify-between shrink-0 gap-4">
