@@ -24,7 +24,6 @@ import {
 
 // =========================================================================
 // 【重要】本番環境（Vercel）で動かすための最終ステップ
-// Vercelにアップロードする前に、必ず先頭の「// 」を消して有効にしてください！
 // =========================================================================
 import { createClient } from '@supabase/supabase-js';
 
@@ -70,7 +69,6 @@ const INITIAL_CHAT = [
 ];
 
 export default function App() {
-  // 認証用のステート
   const [session, setSession] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [email, setEmail] = useState('');
@@ -78,7 +76,6 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [isAuthSubmitLoading, setIsAuthSubmitLoading] = useState(false);
 
-  // 既存のステート
   const [notes, setNotes] = useState([]);
   const [activeView, setActiveView] = useState('dashboard');
   const [isLoading, setIsLoading] = useState(true);
@@ -93,7 +90,6 @@ export default function App() {
   const fileInputRef = useRef(null);
   const chatEndRef = useRef(null);
 
-  // 🔒 セッション（ログイン状態）の確認
   useEffect(() => {
     if (isSupabaseReady) {
       supabase.auth.getSession().then(({ data: { session } }) => {
@@ -109,15 +105,14 @@ export default function App() {
 
       return () => subscription.unsubscribe();
     } else {
-      // プレビュー時は最初は未ログイン扱いにする
       setIsAuthLoading(false);
     }
   }, []);
 
-  // 📝 ノートの取得
   const fetchNotes = async () => {
     try {
       setIsLoading(true);
+      // SupabaseのRLS設定により、自動的に「自分のノートだけ」が取得されます
       const { data, error } = await supabase
         .from('notes')
         .select('*')
@@ -131,19 +126,11 @@ export default function App() {
         setNotes([
           { 
             id: 1, 
-            title: "線形代数 第3回 行列式の計算：サラスの公式と余因子展開", 
-            subject: "数学", 
-            date: "2026-02-24", 
-            preview: "3次正方行列の行列式を求める際のサラスの公式の適用手順。また、n次行列への拡張として重要な余因子展開のコツを詳しくまとめました。計算ミスに注意が必要です。", 
-            tags: ["中間試験", "数学II"] 
-          },
-          { 
-            id: 2, 
-            title: "アルゴリズムとデータ構造：二分探索ツリーの実装と計算量", 
-            subject: "情報", 
-            date: "2026-02-22", 
-            preview: "再帰を用いた探索アルゴリズム。最良ケースO(log n)と最悪ケースO(n)の違い、および平衡木の必要性について。C言語でのポインタ操作を含みます。", 
-            tags: ["C言語", "演習"] 
+            title: "ようこそ KOSEN-base へ！", 
+            subject: "使い方", 
+            date: new Date().toISOString().split('T')[0], 
+            preview: "右上の「画像を追加」ボタンから、あなたのノートやプリントの画像をアップロードしてください。AIが自動で内容を解析して保存します！", 
+            tags: ["チュートリアル", "はじめに"] 
           }
         ]);
       }
@@ -154,19 +141,18 @@ export default function App() {
     }
   };
 
-  // ログイン時のみノートを取得する
   useEffect(() => {
     if (session) {
       fetchNotes();
+    } else {
+      setNotes([]);
     }
   }, [session]);
 
-  // チャットの自動スクロール
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, isChatLoading]);
 
-  // --- 認証機能の実装 ---
   const handleSignUp = async (e) => {
     e.preventDefault();
     if (!email || !password) {
@@ -181,9 +167,8 @@ export default function App() {
         if (error) throw error;
         alert('登録確認メールを送信しました。メール内のリンクをクリックして完了してください。');
       } else {
-        // プレビュー用のモック登録
         await new Promise(r => setTimeout(r, 1000));
-        setSession({ user: { email } });
+        setSession({ user: { id: 'preview-user-id', email } });
       }
     } catch (err) {
       setAuthError(err.message);
@@ -205,12 +190,11 @@ export default function App() {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       } else {
-        // プレビュー用のモックログイン
         await new Promise(r => setTimeout(r, 1000));
-        setSession({ user: { email } });
+        setSession({ user: { id: 'preview-user-id', email } });
       }
     } catch (err) {
-      setAuthError('ログインに失敗しました。メールアドレスとパスワードを確認してください。');
+      setAuthError('ログインに失敗しました。');
     } finally {
       setIsAuthSubmitLoading(false);
     }
@@ -223,7 +207,6 @@ export default function App() {
       setSession(null);
     }
   };
-  // ---------------------
 
   const filteredNotes = notes.filter(note => {
     const q = searchQuery.toLowerCase();
@@ -242,6 +225,7 @@ export default function App() {
     }
     try {
       if (isSupabaseReady) {
+        // 自分のノートのみ削除可能
         const { error } = await supabase.from('notes').delete().eq('id', id);
         if (error) throw error;
       }
@@ -257,7 +241,7 @@ export default function App() {
 
   const handleImageUpload = async (e) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !session) return;
 
     setIsAnalyzing(true);
     setAnalyzeMessage({ type: null, text: null });
@@ -273,7 +257,7 @@ export default function App() {
       const geminiKey = getEnvVar('VITE_GEMINI_API_KEY');
       if (!geminiKey) {
         await new Promise(r => setTimeout(r, 1500));
-        setAnalyzeMessage({ type: 'success', text: 'プレビューモード：Vercelで環境変数を設定すると本番保存されます。' });
+        setAnalyzeMessage({ type: 'success', text: 'プレビューモード完了' });
       } else {
         const targetModel = "gemini-2.5-flash"; 
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${geminiKey}`;
@@ -298,15 +282,17 @@ export default function App() {
         aiText = aiText.replace(/```json/gi, '').replace(/```/g, '').trim();
         const parsedData = JSON.parse(aiText);
 
+        // 【重要変更点】保存時に現在ログインしているユーザーのID（session.user.id）を紐付ける
         const { error: insertError } = await supabase.from('notes').insert([{
           ...parsedData,
-          date: new Date().toISOString().split('T')[0]
+          date: new Date().toISOString().split('T')[0],
+          user_id: session.user.id // ここで持ち主の印をつける
         }]);
         
         if (insertError) throw insertError;
 
         await fetchNotes();
-        setAnalyzeMessage({ type: 'success', text: '画像解析に成功し、データベースに保存されました！' });
+        setAnalyzeMessage({ type: 'success', text: '画像解析に成功し、あなたのノートとして保存されました！' });
       }
       setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 5000);
     } catch (err) {
@@ -369,11 +355,6 @@ export default function App() {
     { id: 'calendar', label: 'カレンダー', icon: CalendarIcon },
   ];
 
-  // -------------------------------------------------------------------------
-  // UIレンダリング部分
-  // -------------------------------------------------------------------------
-
-  // 1. ローディング画面
   if (isAuthLoading) {
     return (
       <div className="flex h-screen w-full bg-[#0a0f18] items-center justify-center">
@@ -382,11 +363,9 @@ export default function App() {
     );
   }
 
-  // 2. ログイン画面
   if (!session) {
     return (
       <div className="flex h-screen w-full bg-[#0a0f18] text-slate-200 font-sans items-center justify-center relative overflow-hidden">
-        {/* 背景の光の装飾 */}
         <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-emerald-500/10 blur-[100px] rounded-full"></div>
         <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-blue-500/10 blur-[100px] rounded-full"></div>
         
@@ -445,18 +424,11 @@ export default function App() {
               </button>
             </div>
           </form>
-          
-          {!isSupabaseReady && (
-             <p className="mt-6 text-center text-[10px] text-emerald-400/80 font-medium">
-               ※プレビューモード：適当な文字を入力してログインボタンを押せます。
-             </p>
-          )}
         </div>
       </div>
     );
   }
 
-  // 3. メイン画面（ログイン後）
   return (
     <div className="flex h-screen w-full bg-[#0a0f18] text-slate-200 font-sans overflow-hidden">
       {menuOpenId && (
@@ -486,7 +458,6 @@ export default function App() {
           ))}
         </nav>
         
-        {/* ユーザープロフィール & ログアウト */}
         <div className="p-4 border-t border-slate-800">
           <button className="w-full flex items-center px-4 py-2 text-slate-400 hover:text-slate-200 text-sm transition-colors group mb-2">
             <Settings className="w-4 h-4 mr-3 group-hover:rotate-45 transition-transform" />
@@ -523,7 +494,7 @@ export default function App() {
                 type="text" 
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="ノートや過去問を検索..." 
+                placeholder="自分のノートを検索..." 
                 className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm font-medium"
               />
             </div>
@@ -584,7 +555,8 @@ export default function App() {
               ) : filteredNotes.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-slate-800 rounded-3xl text-slate-500">
                   <Search className="w-12 h-12 mb-4 opacity-20" />
-                  <p className="font-bold">ノートが見つかりませんでした</p>
+                  <p className="font-bold">まだ自分のノートがありません</p>
+                  <p className="text-xs mt-2">右上のボタンから画像をアップロードしましょう！</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
