@@ -20,21 +20,8 @@ import {
   ChevronRight
 } from 'lucide-react';
 
-// =========================================================================
-// 【ステップ1】データベース (Supabase) を有効にする
-// Vercelで本物のデータを取得するために、以下の1行の先頭の「// 」を消してください。
-// =========================================================================
+// Supabaseと連携（ダミーではなく本物を読み込む）
 import { supabase } from './supabaseClient';
-
-// --- プレビュー用ダミーデータ（本番デプロイ時はこのままでも無視されるのでOKです） ---
-const supabase = {
-  from: () => ({
-    select: () => ({
-      order: () => Promise.resolve({ data: [], error: null })
-    }),
-    insert: () => Promise.resolve({ error: null })
-  })
-};
 
 const INITIAL_CHAT = [
   { id: 1, sender: 'ai', text: 'こんにちは！KOSEN-base AIアシスタントです。ノートの解析や、学習の相談など、何でも聞いてください。' }
@@ -51,14 +38,9 @@ export default function App() {
   
   const fileInputRef = useRef(null);
 
+  // Gemini APIの読み込みを有効化
   const getGeminiKey = () => {
-    // =========================================================================
-    // 【ステップ2】Gemini AI を有効にする
-    // Vercelで画像解析を動かすために、以下の1行の先頭の「// 」を消してください。
-    // =========================================================================
-    // return import.meta.env.VITE_GEMINI_API_KEY;
-    
-    return '';
+    return import.meta.env.VITE_GEMINI_API_KEY || '';
   };
 
   const fetchNotes = async () => {
@@ -74,7 +56,7 @@ export default function App() {
       if (data && data.length > 0) {
         setNotes(data);
       } else {
-        // データがない場合（またはプレビュー環境）のサンプル表示
+        // 本番データベースが空の場合の初期サンプル
         setNotes([
           { 
             id: 1, 
@@ -91,14 +73,6 @@ export default function App() {
             date: "2026-02-22", 
             preview: "再帰を用いた探索アルゴリズム。最良ケースO(log n)と最悪ケースO(n)の違い、および平衡木の必要性について。C言語でのポインタ操作を含みます。", 
             tags: ["C言語", "演習"] 
-          },
-          { 
-            id: 3, 
-            title: "応用物理 剛体の力学：慣性モーメントの導出", 
-            subject: "物理", 
-            date: "2026-02-20", 
-            preview: "円盤および棒の慣性モーメントを積分により導出する過程。平行軸の定理を用いることで、回転運動方程式を簡略化する手法について。レポート課題の図解も参照。", 
-            tags: ["剛体", "レポート"] 
           }
         ]);
       }
@@ -130,41 +104,42 @@ export default function App() {
 
       const geminiKey = getGeminiKey();
       if (!geminiKey) {
-        // APIキーが読み込めない場合（プレビュー環境等）のシミュレーション
-        await new Promise(r => setTimeout(r, 1500));
-        setAnalyzeMessage({ type: 'success', text: 'プレビューモード：解析シミュレーションが完了しました。Vercelでは本物が動きます！' });
-      } else {
-        const targetModel = "gemini-2.5-flash"; 
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${geminiKey}`;
-        
-        const response = await fetch(apiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              role: "user",
-              parts: [
-                { text: "提供された画像から学習ノートの情報を抽出し、JSON形式で返してください。純粋なJSONのみを返してください。\n{\n  \"title\": \"ノートのタイトル\",\n  \"subject\": \"科目名\",\n  \"preview\": \"内容の要約(150文字程度)\",\n  \"tags\": [\"タグ1\", \"タグ2\"]\n}" },
-                { inlineData: { mimeType: file.type, data: base64Data } }
-              ]
-            }]
-          })
-        });
-
-        if (!response.ok) throw new Error(`APIエラー: ${response.status}`);
-        const result = await response.json();
-        let aiText = result.candidates[0].content.parts[0].text;
-        aiText = aiText.replace(/```json/gi, '').replace(/```/g, '').trim();
-        const parsedData = JSON.parse(aiText);
-
-        await supabase.from('notes').insert([{
-          ...parsedData,
-          date: new Date().toISOString().split('T')[0]
-        }]);
-
-        await fetchNotes();
-        setAnalyzeMessage({ type: 'success', text: '画像解析に成功し、データベースに保存されました！' });
+        throw new Error("VITE_GEMINI_API_KEY が設定されていません。VercelのEnvironment Variablesを確認してください。");
       }
+      
+      const targetModel = "gemini-2.5-flash"; 
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${geminiKey}`;
+      
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            role: "user",
+            parts: [
+              { text: "提供された画像から学習ノートの情報を抽出し、JSON形式で返してください。純粋なJSONのみを返してください。\n{\n  \"title\": \"ノートのタイトル\",\n  \"subject\": \"科目名\",\n  \"preview\": \"内容の要約(150文字程度)\",\n  \"tags\": [\"タグ1\", \"タグ2\"]\n}" },
+              { inlineData: { mimeType: file.type, data: base64Data } }
+            ]
+          }]
+        })
+      });
+
+      if (!response.ok) throw new Error(`APIエラー: ${response.status}`);
+      const result = await response.json();
+      let aiText = result.candidates[0].content.parts[0].text;
+      aiText = aiText.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsedData = JSON.parse(aiText);
+
+      // 本番のデータベースへ保存
+      const { error: insertError } = await supabase.from('notes').insert([{
+        ...parsedData,
+        date: new Date().toISOString().split('T')[0]
+      }]);
+      
+      if (insertError) throw insertError;
+
+      await fetchNotes();
+      setAnalyzeMessage({ type: 'success', text: '画像解析に成功し、データベースに保存されました！' });
       setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 5000);
     } catch (err) {
       setAnalyzeMessage({ type: 'error', text: `エラー: ${err.message}` });
@@ -296,7 +271,7 @@ export default function App() {
               {isLoading ? (
                 <div className="flex flex-col items-center justify-center h-64 text-slate-400">
                   <Loader2 className="w-10 h-10 animate-spin text-emerald-500 mb-4" />
-                  <p className="text-xs font-black uppercase tracking-widest opacity-50">Loading data...</p>
+                  <p className="text-xs font-black uppercase tracking-widest opacity-50">Syncing with database...</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
