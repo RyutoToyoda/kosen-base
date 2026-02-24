@@ -33,7 +33,7 @@ import {
 // 【重要】本番環境（Vercel）で動かすための最終ステップ
 // 以下の1行の先頭の「// 」を必ず消して保存し、GitHubにプッシュしてください！
 // =========================================================================
-// import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 
 /**
  * 環境変数の安全な読み込み
@@ -66,13 +66,19 @@ if (isSupabaseReady) {
   // @ts-ignore
   supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 } else {
-  // 開発/エラー回避用のダミーオブジェクト
+  // 未準備時の詳細なエラー特定用メッセージ
+  const getInitErrorMessage = () => {
+    if (!isCreateClientImported) return "28行目のインポートがコメントアウトされたままです。";
+    if (!hasEnvVars) return "Vercelの環境変数が設定されていないか、Redeployが必要です。";
+    return "Supabaseの初期化に失敗しました。";
+  };
+
   supabase = {
     auth: {
       getSession: () => Promise.resolve({ data: { session: null } }),
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
-      signInWithPassword: () => Promise.resolve({ error: { message: 'Supabaseが初期化されていません' } }),
-      signUp: () => Promise.resolve({ error: { message: 'Supabaseが初期化されていません' } }),
+      signInWithPassword: () => Promise.resolve({ error: { message: getInitErrorMessage() } }),
+      signUp: () => Promise.resolve({ error: { message: getInitErrorMessage() } }),
       signOut: () => Promise.resolve({ error: null }),
       updateUser: () => Promise.resolve({ error: null, data: { user: {} } })
     },
@@ -220,10 +226,7 @@ export default function App() {
       throw new Error("28行目のコメントアウト (import { createClient }...) を外して保存し、再デプロイしてください。");
     }
     if (!hasEnvVars) {
-      const missing = [];
-      if (!SUPABASE_URL) missing.push("URL");
-      if (!SUPABASE_ANON_KEY) missing.push("ANON_KEY");
-      throw new Error(`環境変数 (${missing.join(', ')}) が読み込めていません。Vercelで「Redeploy」を行ってください。`);
+      throw new Error(`環境変数が読み込めていません。Viteの仕様上、Vercelで設定した後に「Redeploy」を実行する必要があります。`);
     }
   };
 
@@ -396,7 +399,7 @@ export default function App() {
           <button onClick={(e) => { e.stopPropagation(); deleteItem(note.id); }} className="p-2 hover:bg-red-500/10 rounded-full text-slate-600 hover:text-red-400 transition-all active:scale-90"><Trash2 className="w-4 h-4" /></button>
         </div>
         <h3 className="text-xl font-black text-white mb-3 group-hover:text-emerald-400 transition-colors line-clamp-2 leading-snug tracking-tight">{note.title}</h3>
-        <p className="text-sm text-slate-400 line-clamp-3 mb-6 leading-relaxed font-medium opacity-80">{note.preview}</p>
+        <p className="text-sm text-slate-400 line-clamp-3 mb-4 leading-relaxed font-medium opacity-80">{note.preview}</p>
         <div className="mt-auto pt-5 border-t border-slate-800/50 flex items-center text-[10px] text-slate-600 font-mono font-black tracking-widest uppercase">
           <Clock className="w-3 h-3 mr-2 text-emerald-500/60" />{note.date}
         </div>
@@ -408,6 +411,14 @@ export default function App() {
     const q = searchQuery.toLowerCase();
     return n.title.toLowerCase().includes(q) || n.subject.toLowerCase().includes(q) || (n.preview && n.preview.toLowerCase().includes(q));
   });
+
+  const menuItems = [
+    { id: 'dashboard', label: 'ダッシュボード', icon: LayoutDashboard },
+    { id: 'notes', label: 'マイノート', icon: BookOpen },
+    { id: 'exams', label: '過去問', icon: FileText },
+    { id: 'materials', label: '学習資料', icon: Bookmark },
+    { id: 'calendar', label: 'カレンダー', icon: CalendarIcon },
+  ];
 
   if (isAuthLoading) return <div className="flex h-screen w-full bg-[#0a0f18] items-center justify-center"><Loader2 className="w-12 h-12 animate-spin text-emerald-500" /></div>;
 
@@ -439,8 +450,8 @@ export default function App() {
             </div>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[20px] px-6 py-5 text-sm focus:border-emerald-500 transition-all font-bold placeholder:text-slate-700" placeholder="Email Address" />
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[20px] px-6 py-5 text-sm focus:border-emerald-500 transition-all font-bold placeholder:text-slate-700" placeholder="Password" />
-            {authError && <div className="text-red-400 text-xs flex items-start bg-red-400/5 p-5 rounded-2xl border border-red-500/20"><AlertCircle className="w-5 h-5 mr-3 shrink-0" />{authError}</div>}
-            <button type="submit" disabled={isAuthSubmitLoading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-5 rounded-[24px] font-black transition-all shadow-2xl shadow-emerald-900/40 active:scale-95 flex items-center justify-center disabled:opacity-50 text-sm tracking-widest uppercase">
+            {authError && <div className="text-red-400 text-xs flex items-start bg-red-400/5 p-5 rounded-2xl border border-red-500/20 text-left"><AlertCircle className="w-5 h-5 mr-3 shrink-0" />{authError}</div>}
+            <button type="submit" disabled={isAuthSubmitLoading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-5 rounded-[24px] font-black transition-all shadow-2xl shadow-emerald-900/40 active:scale-95 flex items-center justify-center disabled:opacity-50 text-sm tracking-widest uppercase text-left">
               {isAuthSubmitLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : (isLoginMode ? 'Sign In Now' : 'Create Account')}
             </button>
           </form>
@@ -517,11 +528,11 @@ export default function App() {
       {isProfileModalOpen && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 backdrop-blur-3xl p-4 animate-in fade-in duration-700">
           <div className="bg-[#0d1424] border border-slate-700 rounded-[56px] p-12 w-full max-w-md shadow-2xl relative animate-in zoom-in-95 duration-500">
-            <div className="w-24 h-24 bg-emerald-500/10 rounded-[32px] flex items-center justify-center mb-10 mx-auto border border-emerald-500/20 shadow-inner">
+            <div className="w-24 h-24 bg-emerald-500/10 rounded-[32px] flex items-center justify-center mb-10 mx-auto border border-emerald-500/20 shadow-inner text-left">
               <User className="w-12 h-12 text-emerald-500" />
             </div>
             <h2 className="text-3xl font-black text-white text-center mb-2 tracking-tighter">Identity Setup</h2>
-            <p className="text-slate-600 text-center text-[10px] font-black mb-12 tracking-[0.4em] uppercase">Configure your college profile</p>
+            <p className="text-slate-600 text-center text-[10px] font-black mb-12 tracking-[0.4em] uppercase text-left">Configure your college profile</p>
             <form onSubmit={handleUpdateProfile} className="space-y-6 text-left">
               <input required type="text" value={profileForm.kosen} onChange={e => setProfileForm({...profileForm, kosen: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[24px] px-7 py-5 text-sm focus:border-emerald-500 transition-all font-bold placeholder:text-slate-700" placeholder="高専名 (例: 東京)" />
               <input required type="text" value={profileForm.department} onChange={e => setProfileForm({...profileForm, department: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[24px] px-7 py-5 text-sm focus:border-emerald-500 transition-all font-bold placeholder:text-slate-700" placeholder="学科名 (例: 情報工学科)" />
@@ -541,9 +552,9 @@ export default function App() {
       {isAddModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in" onClick={() => setIsAddModalOpen(false)}>
           <div className="bg-[#0d1424] border border-slate-700 rounded-[48px] p-10 w-full max-w-xl shadow-2xl relative animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
-            <h2 className="text-2xl font-black text-white mb-10 flex items-center tracking-widest uppercase leading-none"><Plus className="w-8 h-8 mr-4 text-emerald-500" /> New Record</h2>
+            <h2 className="text-2xl font-black text-white mb-10 flex items-center tracking-widest uppercase leading-none text-left"><Plus className="w-8 h-8 mr-4 text-emerald-500" /> New Record</h2>
             
-            <div className="flex bg-[#161f33] p-1.5 rounded-[20px] mb-10 shadow-inner border border-slate-800">
+            <div className="flex bg-[#161f33] p-1.5 rounded-[20px] mb-10 shadow-inner border border-slate-800 text-left">
               {['note', 'exam', 'material'].map(t => (
                 <button key={t} onClick={() => setNewItemType(t)} className={`flex-1 py-3 text-[11px] font-black uppercase rounded-2xl transition-all ${newItemType === t ? 'bg-emerald-600 text-white shadow-xl scale-105' : 'text-slate-600 hover:text-slate-400'}`}>
                   {t === 'note' ? 'Lecture' : t === 'exam' ? 'Exam' : 'Resource'}
@@ -565,9 +576,9 @@ export default function App() {
               <input required type="text" value={newNote.subject} onChange={e => setNewNote({...newNote, subject: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[20px] px-6 py-5 text-sm focus:border-emerald-500 font-bold placeholder:text-slate-700" placeholder="Subject Name" />
               <textarea value={newNote.preview} onChange={e => setNewNote({...newNote, preview: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[20px] px-6 py-5 text-sm h-40 resize-none focus:border-emerald-500 font-medium leading-relaxed placeholder:text-slate-700" placeholder="Content details..." />
               
-              <div className="flex gap-4 pt-8">
-                <button type="button" onClick={() => setIsAddModalOpen(false)} className="flex-1 bg-[#161f33] text-slate-600 py-5 rounded-[24px] font-black border border-slate-700 text-[10px] uppercase tracking-[0.2em] hover:bg-slate-800 transition-all">Cancel</button>
-                <button type="submit" disabled={isAdding} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-5 rounded-[24px] font-black shadow-2xl active:scale-95 flex items-center justify-center text-[10px] uppercase tracking-[0.2em]">
+              <div className="flex gap-4 pt-8 text-left">
+                <button type="button" onClick={() => setIsAddModalOpen(false)} className="flex-1 bg-[#161f33] text-slate-600 py-4 rounded-2xl font-black border border-slate-700 text-[10px] uppercase tracking-[0.2em] hover:bg-slate-800 transition-all">Cancel</button>
+                <button type="submit" disabled={isAdding} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-black shadow-2xl active:scale-95 flex items-center justify-center text-[10px] uppercase tracking-[0.2em]">
                   {isAdding ? <Loader2 className="w-6 h-6 animate-spin" /> : 'Push to DB'}
                 </button>
               </div>
@@ -580,8 +591,8 @@ export default function App() {
       {isEventModalOpen && (
         <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsEventModalOpen(false)}>
           <div className="bg-[#0d1424] border border-slate-700 rounded-[40px] p-10 w-full max-w-sm shadow-2xl relative animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
-            <h2 className="text-2xl font-black text-white mb-8 flex items-center uppercase tracking-tighter leading-none"><CalendarIcon className="w-7 h-7 mr-4 text-emerald-500" /> New Event</h2>
-            <p className="text-[10px] text-slate-600 mb-8 font-mono font-black tracking-widest uppercase leading-none border-l-2 border-emerald-500 pl-4">{selectedDate}</p>
+            <h2 className="text-2xl font-black text-white mb-8 flex items-center uppercase tracking-tighter leading-none text-left"><CalendarIcon className="w-7 h-7 mr-4 text-emerald-500" /> New Event</h2>
+            <p className="text-[10px] text-slate-600 mb-8 font-mono font-black tracking-widest uppercase leading-none border-l-2 border-emerald-500 pl-4 text-left">{selectedDate}</p>
             <form onSubmit={(e) => {
               e.preventDefault();
               if (!newEventTitle.trim()) return;
@@ -589,7 +600,7 @@ export default function App() {
               setNewEventTitle(''); setIsEventModalOpen(false);
             }} className="space-y-6 text-left">
               <input type="text" autoFocus required value={newEventTitle} onChange={e => setNewEventTitle(e.target.value)} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[20px] px-6 py-5 text-sm focus:border-emerald-500 shadow-inner font-bold placeholder:text-slate-700" placeholder="Title" />
-              <div className="flex gap-4 pt-4">
+              <div className="flex gap-4 pt-4 text-left">
                 <button type="button" onClick={() => setIsEventModalOpen(false)} className="flex-1 bg-[#161f33] text-slate-600 py-4 rounded-2xl font-black border border-slate-700 text-[10px] uppercase">Back</button>
                 <button type="submit" className="flex-1 bg-emerald-600 text-white py-4 rounded-2xl font-black text-[10px] uppercase shadow-lg">Save</button>
               </div>
@@ -600,7 +611,7 @@ export default function App() {
 
       {/* サイドバー */}
       <aside className="w-72 bg-[#0d1424] border-r border-slate-800 flex flex-col hidden md:flex z-20 shrink-0 shadow-2xl">
-        <div className="h-24 flex items-center px-10 border-b border-slate-800 shrink-0">
+        <div className="h-24 flex items-center px-10 border-b border-slate-800 shrink-0 text-left">
           <GraduationCap className="w-10 h-10 text-emerald-500 mr-5" />
           <h1 className="text-2xl font-black text-white tracking-[0.1em] uppercase leading-none tracking-tighter">KOSEN-base</h1>
         </div>
@@ -611,45 +622,45 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="p-8 border-t border-slate-800 shrink-0">
+        <div className="p-8 border-t border-slate-800 shrink-0 text-left">
           <button onClick={() => { setActiveView('settings'); setSelectedSubject(null); }} className={`w-full flex items-center px-6 py-4 text-[11px] font-black uppercase tracking-widest transition-all group mb-6 rounded-2xl ${activeView === 'settings' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:text-slate-300 hover:bg-slate-800/50'}`}>
             <Settings className="w-5 h-5 mr-5 group-hover:rotate-180 transition-transform duration-1000" />SETTING
           </button>
-          <div onClick={handleSignOut} className="flex items-center px-5 py-5 rounded-[32px] bg-[#161f33]/30 border border-slate-800 hover:bg-slate-800/50 hover:border-slate-700 cursor-pointer transition-all group overflow-hidden shadow-sm">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-600 flex items-center justify-center text-white font-black mr-5 shadow-xl border border-emerald-400/20 uppercase shrink-0 text-sm leading-none">{session.user.user_metadata?.kosen ? session.user.user_metadata.kosen[0] : 'U'}</div>
+          <div onClick={handleSignOut} className="flex items-center px-5 py-5 rounded-[32px] bg-[#161f33]/30 border border-slate-800 hover:bg-slate-800/50 hover:border-slate-700 cursor-pointer transition-all group overflow-hidden shadow-sm text-left">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-600 flex items-center justify-center text-white font-black mr-5 shadow-lg border border-emerald-400/20 uppercase shrink-0 text-sm leading-none">{session.user.user_metadata?.kosen ? session.user.user_metadata.kosen[0] : 'U'}</div>
             <div className="overflow-hidden flex-1 text-left">
               <p className="text-xs font-black text-slate-100 truncate tracking-tight uppercase leading-none mb-1.5">{session.user.user_metadata?.kosen ? `${session.user.user_metadata.kosen}` : 'USER'}</p>
               <p className="text-[9px] text-slate-600 font-mono font-black group-hover:text-red-400 truncate tracking-tighter uppercase leading-none">{session.user.user_metadata?.grade || 'N/A'} / {session.user.user_metadata?.department || 'N/A'}</p>
             </div>
             <LogOut className="w-5 h-5 text-slate-700 group-hover:text-red-400 transition-colors ml-3 shrink-0" />
           </div>
-          <p className="text-[9px] text-slate-800 mt-10 text-center font-mono font-black tracking-[0.4em] uppercase opacity-30">VER 1.2.1 RELOADED</p>
+          <p className="text-[9px] text-slate-800 mt-10 text-center font-mono font-black tracking-[0.3em] uppercase opacity-30">VER 1.2.1 RELOADED</p>
         </div>
       </aside>
 
       {/* メインエリア */}
       <main className="flex-1 flex flex-col min-w-0 bg-[#0a0f18] overflow-hidden relative z-20 text-left">
-        <header className="h-24 flex items-center justify-between px-12 border-b border-slate-800 bg-[#0d1424]/80 backdrop-blur-2xl shrink-0">
-          <div className="flex-1 max-w-2xl relative group text-left">
+        <header className="h-24 flex items-center justify-between px-12 border-b border-slate-800 bg-[#0d1424]/80 backdrop-blur-xl shrink-0 text-left">
+          <div className="flex-1 max-w-2xl relative group text-left text-left">
             <Search className="w-6 h-6 absolute left-5 top-1/2 transform -translate-y-1/2 text-slate-700 group-focus-within:text-emerald-500 transition-colors" />
-            <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search records, tags, subjects..." className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[24px] pl-14 pr-8 py-4 focus:outline-none focus:border-emerald-500 transition-all text-sm font-black shadow-inner placeholder:text-slate-800" />
+            <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search records, tags, subjects..." className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[24px] pl-14 pr-8 py-4 focus:outline-none focus:border-emerald-500 transition-all text-sm font-black shadow-inner placeholder:text-slate-800 text-left" />
           </div>
-          <div className="ml-10 flex items-center gap-5 shrink-0">
+          <div className="ml-10 flex items-center gap-5 shrink-0 text-left">
             <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
-            <button onClick={() => fileInputRef.current?.click()} disabled={isAnalyzing} className="flex items-center bg-[#161f33] hover:bg-slate-700 text-slate-400 border border-slate-700 px-7 py-4 rounded-[20px] font-black transition-all disabled:opacity-50 text-[10px] uppercase tracking-widest shadow-2xl active:scale-95 group">
+            <button onClick={() => fileInputRef.current?.click()} disabled={isAnalyzing} className="flex items-center bg-[#161f33] hover:bg-slate-700 text-slate-400 border border-slate-700 px-7 py-4 rounded-[20px] font-black transition-all disabled:opacity-50 text-[10px] uppercase tracking-widest shadow-2xl active:scale-95 group text-left">
               {isAnalyzing ? <Loader2 className="w-5 h-5 mr-3 animate-spin text-emerald-500" /> : <ImagePlus className="w-5 h-5 mr-3 text-emerald-500 group-hover:rotate-12 transition-transform" />} 
               Analyze
             </button>
-            <button onClick={() => setIsAddModalOpen(true)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-9 py-4 rounded-[20px] font-black transition-all shadow-[0_0_24px_rgba(16,185,129,0.3)] active:scale-95 text-[10px] uppercase tracking-widest flex items-center leading-none"><Plus className="w-5 h-5 mr-2.5" /> Create</button>
+            <button onClick={() => setIsAddModalOpen(true)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-9 py-4 rounded-[20px] font-black transition-all shadow-[0_0_24px_rgba(16,185,129,0.3)] active:scale-95 text-[10px] uppercase tracking-widest flex items-center leading-none text-left"><Plus className="w-5 h-5 mr-2.5" /> Create</button>
           </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-12 scrollbar-hide text-left">
           {analyzeMessage.text && (
-            <div className="mb-10 animate-in slide-in-from-top duration-500">
+            <div className="mb-10 animate-in slide-in-from-top duration-500 text-left">
               <div className={`border px-7 py-6 rounded-[32px] flex items-center shadow-2xl backdrop-blur-md ${analyzeMessage.type === 'error' ? 'bg-red-950/80 border-red-800 text-red-200' : 'bg-emerald-950/80 border-emerald-800 text-emerald-200'}`}>
                 {analyzeMessage.type === 'error' ? <AlertCircle className="w-7 h-7 mr-5 shrink-0 text-red-400" /> : <CheckCircle2 className="w-7 h-7 mr-5 shrink-0 text-emerald-400" />}
-                <p className="flex-1 text-sm font-black tracking-tight text-left leading-relaxed">{analyzeMessage.text}</p>
+                <p className="flex-1 text-sm font-black tracking-tight text-left leading-relaxed text-left">{analyzeMessage.text}</p>
                 <button onClick={() => setAnalyzeMessage({type: null, text: null})} className="ml-8 text-[11px] font-black uppercase tracking-[0.2em] hover:underline opacity-40">Close</button>
               </div>
             </div>
@@ -657,38 +668,38 @@ export default function App() {
           
           {/* --- DASHBOARD VIEW --- */}
           {activeView === 'dashboard' && (
-            <div className="max-w-7xl mx-auto animate-in fade-in duration-700">
-              <h2 className="text-3xl font-black text-white flex items-center mb-12 tracking-tighter text-left leading-none uppercase tracking-[0.1em]"><LayoutDashboard className="w-8 h-8 mr-5 text-emerald-500" /> Latest Activity</h2>
+            <div className="max-w-7xl mx-auto animate-in fade-in duration-700 text-left">
+              <h2 className="text-3xl font-black text-white flex items-center mb-12 tracking-tighter text-left leading-none uppercase tracking-[0.1em] text-left"><LayoutDashboard className="w-8 h-8 mr-5 text-emerald-500" /> Latest Activity</h2>
               {isLoading ? (
                 <div className="flex flex-col items-center justify-center h-[50vh]"><Loader2 className="w-16 h-16 animate-spin text-emerald-500" /></div>
               ) : filteredItems.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-[50vh] border-2 border-dashed border-slate-800 rounded-[56px] text-slate-800 group transition-colors hover:border-emerald-500/20">
+                <div className="flex flex-col items-center justify-center h-[50vh] border-2 border-dashed border-slate-800 rounded-[56px] text-slate-800 group transition-colors hover:border-emerald-500/20 text-left">
                   <Search className="w-20 h-20 mb-8 opacity-5 group-hover:opacity-10 transition-opacity" />
                   <p className="font-black uppercase tracking-[0.5em] text-[10px]">No Data Streams Found</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">{filteredItems.slice(0, 12).map(renderCard)}</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10 text-left">{filteredItems.slice(0, 12).map(renderCard)}</div>
               )}
             </div>
           )}
 
           {/* --- NOTES VIEW --- */}
           {activeView === 'notes' && (
-            <div className="max-w-7xl mx-auto animate-in slide-in-from-bottom duration-700">
+            <div className="max-w-7xl mx-auto animate-in slide-in-from-bottom duration-700 text-left">
               {!selectedSubject ? (
-                <div className="text-center py-16">
+                <div className="text-center py-16 text-left">
                   <div className="w-32 h-32 bg-emerald-500/10 rounded-[48px] flex items-center justify-center mx-auto mb-12 border border-emerald-500/20 shadow-2xl"><BookOpen className="w-16 h-16 text-emerald-500" /></div>
-                  <h2 className="text-5xl font-black text-white mb-4 tracking-tighter uppercase leading-none">Note Archives</h2>
-                  <p className="text-slate-600 mb-20 font-black tracking-[0.2em] uppercase text-xs opacity-50">Lecture streams grouped by subject</p>
+                  <h2 className="text-5xl font-black text-white mb-4 tracking-tighter uppercase leading-none text-center">Note Archives</h2>
+                  <p className="text-slate-600 mb-20 font-black tracking-[0.2em] uppercase text-xs opacity-50 text-center">Lecture streams grouped by subject</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto text-left">
                     {Array.from(new Set(filteredItems.filter(n => getItemType(n.tags) === 'note').map(n => n.subject))).map(sub => (
-                      <div key={sub} onClick={() => setSelectedSubject(sub)} className="p-10 bg-[#0d1424] border border-slate-800 rounded-[40px] hover:border-emerald-500/40 hover:bg-[#162136] transition-all duration-500 flex items-center justify-between cursor-pointer group shadow-2xl text-left relative overflow-hidden">
+                      <div key={sub} onClick={() => setSelectedSubject(sub)} className="p-10 bg-[#0d1424] border border-slate-800 rounded-[40px] hover:border-emerald-500/40 hover:bg-[#162136] transition-all duration-500 flex items-center justify-between cursor-pointer group shadow-2xl text-left relative overflow-hidden text-left">
                         <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-3xl rounded-full transition-all group-hover:bg-emerald-500/10"></div>
-                        <div className="flex items-center relative z-10">
+                        <div className="flex items-center relative z-10 text-left text-left">
                           <div className="w-16 h-16 bg-slate-800 rounded-3xl flex items-center justify-center mr-8 group-hover:bg-emerald-600 transition-all duration-700 shadow-xl shrink-0"><FileText className="w-8 h-8 text-white" /></div>
                           <div>
-                            <p className="font-black text-slate-100 text-2xl tracking-tighter leading-none mb-3">{sub || 'Global'}</p>
-                            <p className="text-[10px] text-slate-600 font-black uppercase tracking-[0.3em] leading-none">{filteredItems.filter(n => n.subject === sub && getItemType(n.tags)==='note').length} Records</p>
+                            <p className="font-black text-slate-100 text-2xl tracking-tighter leading-none mb-3 text-left">{sub || 'Global'}</p>
+                            <p className="text-[10px] text-slate-600 font-black uppercase tracking-[0.3em] leading-none text-left">{filteredItems.filter(n => n.subject === sub && getItemType(n.tags)==='note').length} Records</p>
                           </div>
                         </div>
                         <ChevronRight className="w-7 h-7 text-slate-800 group-hover:text-emerald-500 transform group-hover:translate-x-3 transition-all shrink-0" />
@@ -697,20 +708,20 @@ export default function App() {
                   </div>
                 </div>
               ) : (
-                <div className="animate-in fade-in duration-700 text-left">
-                  <button onClick={() => setSelectedSubject(null)} className="flex items-center text-slate-600 hover:text-emerald-400 font-black text-xs mb-12 transition-all uppercase tracking-[0.3em] leading-none group"><ArrowLeft className="w-6 h-6 mr-4 group-hover:-translate-x-3 transition-all" /> Return to Root</button>
-                  <h2 className="text-4xl font-black text-white mb-12 border-l-[12px] border-emerald-500 pl-10 leading-none uppercase tracking-tighter">{selectedSubject} Stream</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">{filteredItems.filter(n => n.subject === selectedSubject && getItemType(n.tags)==='note').map(renderCard)}</div>
+                <div className="animate-in fade-in duration-700 text-left text-left">
+                  <button onClick={() => setSelectedSubject(null)} className="flex items-center text-slate-600 hover:text-emerald-400 font-black text-xs mb-12 transition-all uppercase tracking-[0.3em] leading-none group text-left"><ArrowLeft className="w-6 h-6 mr-4 group-hover:-translate-x-3 transition-all" /> Return to Root</button>
+                  <h2 className="text-4xl font-black text-white mb-12 border-l-[12px] border-emerald-500 pl-10 leading-none uppercase tracking-tighter text-left">{selectedSubject} Stream</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10 text-left">{filteredItems.filter(n => n.subject === selectedSubject && getItemType(n.tags)==='note').map(renderCard)}</div>
                 </div>
               )}
             </div>
           )}
 
           {activeView === 'exams' && (
-            <div className="max-w-7xl mx-auto animate-in slide-in-from-bottom duration-700 text-left">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-16 gap-8 text-left leading-none">
-                <h2 className="text-4xl font-black text-white flex items-center tracking-tighter uppercase leading-none"><FileText className="w-10 h-10 mr-5 text-red-500" /> Exam Core</h2>
-                <div className="flex bg-[#161f33] border border-slate-700 rounded-[28px] p-2 shadow-2xl min-w-[420px] shadow-black/50">
+            <div className="max-w-7xl mx-auto animate-in slide-in-from-bottom duration-700 text-left text-left">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-16 gap-8 text-left leading-none text-left">
+                <h2 className="text-4xl font-black text-white flex items-center tracking-tighter uppercase leading-none text-left"><FileText className="w-10 h-10 mr-5 text-red-500" /> Exam Core</h2>
+                <div className="flex bg-[#161f33] border border-slate-700 rounded-[28px] p-2 shadow-2xl min-w-[420px] shadow-black/50 text-left text-left">
                   <div className="flex items-center px-5 border-r border-slate-700 text-slate-600"><Filter className="w-5 h-5" /></div>
                   <select value={examFilter.grade} onChange={e => setExamFilter({...examFilter, grade: e.target.value})} className="bg-transparent text-slate-400 text-[11px] font-black uppercase px-5 py-3 outline-none cursor-pointer flex-1 transition-all hover:text-white">
                     <option value="">Year</option><option value="1年">1st</option><option value="2年">2nd</option><option value="3年">3rd</option><option value="4年">4th</option><option value="5年">5th</option>
@@ -723,7 +734,7 @@ export default function App() {
                   </select>
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10 text-left">
                 {filteredItems.filter(n => {
                   if (getItemType(n.tags) !== 'exam') return false;
                   const m = getExamMeta(n.tags);
@@ -737,25 +748,25 @@ export default function App() {
           )}
 
           {activeView === 'materials' && (
-            <div className="max-w-7xl mx-auto animate-in fade-in duration-700 text-left">
-              <h2 className="text-4xl font-black text-white flex items-center mb-16 tracking-tighter uppercase leading-none"><Bookmark className="w-10 h-10 mr-5 text-blue-500" /> Digital Library</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">{filteredItems.filter(n => getItemType(n.tags) === 'material').map(renderCard)}</div>
+            <div className="max-w-7xl mx-auto animate-in fade-in duration-700 text-left text-left">
+              <h2 className="text-4xl font-black text-white flex items-center mb-16 tracking-tighter uppercase leading-none text-left"><Bookmark className="w-10 h-10 mr-5 text-blue-500" /> Digital Library</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10 text-left">{filteredItems.filter(n => getItemType(n.tags) === 'material').map(renderCard)}</div>
             </div>
           )}
 
           {activeView === 'calendar' && (
-            <div className="max-w-7xl mx-auto animate-in slide-in-from-top duration-1000 text-left">
-              <h2 className="text-4xl font-black text-white flex items-center mb-12 tracking-tighter text-left leading-none uppercase"><CalendarIcon className="w-10 h-10 mr-6 text-emerald-500" /> Timeline <span className="ml-8 text-base text-slate-700 font-mono font-black tracking-[0.4em] opacity-40">{calendar.year}.{String(calendar.month + 1).padStart(2,'0')}</span></h2>
-              <div className="grid grid-cols-7 gap-px bg-slate-800 rounded-[56px] overflow-hidden border border-slate-800 shadow-[0_32px_64px_rgba(0,0,0,0.5)]">
+            <div className="max-w-7xl mx-auto animate-in slide-in-from-top duration-1000 text-left text-left">
+              <h2 className="text-4xl font-black text-white flex items-center mb-12 tracking-tighter text-left leading-none uppercase text-left"><CalendarIcon className="w-10 h-10 mr-6 text-emerald-500" /> Timeline <span className="ml-8 text-base text-slate-700 font-mono font-black tracking-[0.4em] opacity-40">{calendar.year}.{String(calendar.month + 1).padStart(2,'0')}</span></h2>
+              <div className="grid grid-cols-7 gap-px bg-slate-800 rounded-[56px] overflow-hidden border border-slate-800 shadow-[0_32px_64px_rgba(0,0,0,0.5)] text-left">
                 {['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(day => <div key={day} className="bg-[#11192a] py-8 text-center text-[11px] font-black text-slate-700 tracking-[0.4em] uppercase border-b border-slate-800/50">{day}</div>)}
                 {calendar.days.map((d, i) => (
-                  <div key={i} onClick={() => d && (setSelectedDate(d.dateStr), setIsEventModalOpen(true))} className={`bg-[#0d1424] min-h-[180px] p-6 transition-all duration-500 relative ${d ? 'hover:bg-slate-800/50 cursor-pointer group/cell' : 'opacity-20 cursor-default shadow-inner'}`}>
+                  <div key={i} onClick={() => d && (setSelectedDate(d.dateStr), setIsEventModalOpen(true))} className={`bg-[#0d1424] min-h-[180px] p-6 transition-all duration-500 relative ${d ? 'hover:bg-slate-800/50 cursor-pointer group/cell' : 'opacity-20 cursor-default shadow-inner'} text-left`}>
                     {d && (
                       <>
                         <span className={`text-sm font-mono font-black transition-all ${d.dateStr === new Date().toISOString().split('T')[0] ? 'text-emerald-400 bg-emerald-500/10 px-4 py-2 rounded-2xl ring-1 ring-emerald-500/50 shadow-emerald-500/20' : 'text-slate-800'}`}>{d.day}</span>
-                        <div className="mt-8 space-y-3">
+                        <div className="mt-8 space-y-3 text-left text-left text-left">
                           {events[d.dateStr]?.map(ev => (
-                            <div key={ev.id} className="px-4 py-3 bg-emerald-500/10 border-l-[4px] border-emerald-500 rounded-xl text-[10px] text-emerald-100 font-black flex justify-between items-center transition-all hover:bg-emerald-500/20 group/ev shadow-lg">
+                            <div key={ev.id} className="px-4 py-3 bg-emerald-500/10 border-l-[4px] border-emerald-500 rounded-xl text-[10px] text-emerald-100 font-black flex justify-between items-center transition-all hover:bg-emerald-500/20 group/ev shadow-lg text-left">
                               <span className="truncate pr-3 uppercase tracking-tighter">{ev.title}</span>
                               <X onClick={e => { e.stopPropagation(); setEvents(p => ({ ...p, [d.dateStr]: p[d.dateStr].filter(x => x.id !== ev.id) })); }} className="w-4 h-4 opacity-0 group-hover/ev:opacity-100 text-red-500 hover:scale-150 transition-all cursor-pointer" />
                             </div>
@@ -770,22 +781,22 @@ export default function App() {
           )}
 
           {activeView === 'settings' && (
-            <div className="max-w-2xl mx-auto py-16 animate-in fade-in duration-700 text-left">
-              <h2 className="text-4xl font-black text-white mb-16 flex items-center tracking-tighter leading-none uppercase tracking-[0.1em]"><Settings className="w-10 h-10 mr-6 text-emerald-500" /> Preferences</h2>
-              <div className="bg-[#0d1424] border border-slate-800 rounded-[56px] p-14 shadow-[0_48px_96px_rgba(0,0,0,0.6)] relative overflow-hidden text-left border-t-emerald-500/30">
-                <form onSubmit={handleUpdateProfile} className="space-y-10 text-left">
-                  <div className="space-y-3 text-left"><label className="block text-[11px] font-black text-slate-700 uppercase tracking-[0.5em] ml-2 text-left">Account ID</label><input type="text" disabled value={session.user.email} className="w-full bg-[#161f33]/50 border border-slate-800 text-slate-800 rounded-[28px] px-8 py-5 text-sm cursor-not-allowed font-mono font-black tracking-tight" /></div>
-                  <div className="space-y-3 text-left"><label className="block text-[11px] font-black text-slate-500 uppercase tracking-[0.5em] ml-2 text-left">College Campus</label><input required type="text" value={profileForm.kosen} onChange={e => setProfileForm({...profileForm, kosen: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[28px] px-8 py-5 text-sm focus:border-emerald-500 font-black transition-all shadow-inner" placeholder="Technical College" /></div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 text-left">
-                    <div className="space-y-3 text-left"><label className="block text-[11px] font-black text-slate-500 uppercase tracking-[0.5em] ml-2 text-left">Engineering Major</label><input required type="text" value={profileForm.department} onChange={e => setProfileForm({...profileForm, department: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[28px] px-8 py-5 text-sm focus:border-emerald-500 font-black transition-all shadow-inner" placeholder="Department" /></div>
-                    <div className="space-y-3 text-left"><label className="block text-[11px] font-black text-slate-500 uppercase tracking-[0.5em] ml-2 text-left">Current Grade</label>
-                      <select required value={profileForm.grade} onChange={e => setProfileForm({...profileForm, grade: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[28px] px-8 py-5 text-sm outline-none font-black appearance-none transition-all shadow-inner">
+            <div className="max-w-2xl mx-auto py-16 animate-in fade-in duration-700 text-left text-left">
+              <h2 className="text-4xl font-black text-white mb-16 flex items-center tracking-tighter leading-none uppercase tracking-[0.1em] text-left"><Settings className="w-10 h-10 mr-6 text-emerald-500" /> Preferences</h2>
+              <div className="bg-[#0d1424] border border-slate-800 rounded-[56px] p-14 shadow-[0_48px_96px_rgba(0,0,0,0.6)] relative overflow-hidden text-left border-t-emerald-500/30 text-left">
+                <form onSubmit={handleUpdateProfile} className="space-y-10 text-left text-left">
+                  <div className="space-y-3 text-left text-left"><label className="block text-[11px] font-black text-slate-700 uppercase tracking-[0.5em] ml-2 text-left">Account Holder</label><input type="text" disabled value={session.user.email} className="w-full bg-[#161f33]/50 border border-slate-800 text-slate-800 rounded-[28px] px-8 py-5 text-sm cursor-not-allowed font-mono font-black tracking-tight text-left" /></div>
+                  <div className="space-y-3 text-left text-left"><label className="block text-[11px] font-black text-slate-500 uppercase tracking-[0.5em] ml-2 text-left">College Campus</label><input required type="text" value={profileForm.kosen} onChange={e => setProfileForm({...profileForm, kosen: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[28px] px-8 py-5 text-sm focus:border-emerald-500 font-black transition-all shadow-inner text-left" placeholder="Technical College" /></div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 text-left text-left">
+                    <div className="space-y-3 text-left text-left text-left"><label className="block text-[11px] font-black text-slate-500 uppercase tracking-[0.5em] ml-2 text-left">Engineering Major</label><input required type="text" value={profileForm.department} onChange={e => setProfileForm({...profileForm, department: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[28px] px-8 py-5 text-sm focus:border-emerald-500 font-black transition-all shadow-inner text-left" placeholder="Department" /></div>
+                    <div className="space-y-3 text-left text-left text-left"><label className="block text-[11px] font-black text-slate-500 uppercase tracking-[0.5em] ml-2 text-left">Current Grade</label>
+                      <select required value={profileForm.grade} onChange={e => setProfileForm({...profileForm, grade: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-[28px] px-8 py-5 text-sm outline-none font-black appearance-none transition-all shadow-inner text-left">
                         <option value="1年">1st Year</option><option value="2年">2nd Year</option><option value="3年">3rd Year</option><option value="4年">4th Year</option><option value="5年">5th Year</option><option value="専攻科">Adv. Course</option>
                       </select>
                     </div>
                   </div>
-                  <div className="pt-12 flex justify-end border-t border-slate-800">
-                    <button type="submit" disabled={isProfileUpdating} className="bg-emerald-600 hover:bg-emerald-500 text-white px-16 py-5 rounded-[32px] font-black transition-all shadow-2xl active:scale-95 flex items-center justify-center min-w-[240px] disabled:opacity-50 uppercase text-[11px] tracking-[0.4em]">Save Identity</button>
+                  <div className="pt-12 flex justify-end border-t border-slate-800 text-left">
+                    <button type="submit" disabled={isProfileUpdating} className="bg-emerald-600 hover:bg-emerald-500 text-white px-16 py-5 rounded-[32px] font-black transition-all shadow-2xl active:scale-95 flex items-center justify-center min-w-[240px] disabled:opacity-50 uppercase text-[11px] tracking-[0.4em] text-left">Save Identity</button>
                   </div>
                 </form>
               </div>
@@ -795,31 +806,31 @@ export default function App() {
       </main>
 
       {/* 右サイドバー：AIチャット */}
-      <aside className="w-96 bg-[#0d1424] border-l border-slate-800 flex flex-col hidden lg:flex shrink-0 shadow-[0_0_64px_rgba(0,0,0,0.5)] relative z-20 text-left">
-        <div className="h-24 flex items-center px-10 border-b border-slate-800 bg-[#0d1424] shrink-0 text-left">
-          <div className="w-14 h-14 rounded-[20px] bg-emerald-500/10 flex items-center justify-center mr-6 border border-emerald-500/20 shadow-inner shrink-0 transition-all hover:rotate-12 hover:scale-110"><BrainCircuit className="w-7 h-7 text-emerald-400" /></div>
-          <div><h2 className="font-black text-slate-100 text-[12px] tracking-[0.3em] uppercase leading-none mb-1.5">KOSEN AI</h2><div className="flex items-center mt-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 mr-2.5 animate-pulse shadow-[0_0_12px_rgba(16,185,129,0.8)]"></span><span className="text-[10px] text-emerald-500 font-black uppercase tracking-[0.2em] opacity-80">Syncing Intelligence</span></div></div>
+      <aside className="w-96 bg-[#0d1424] border-l border-slate-800 flex flex-col hidden lg:flex shrink-0 shadow-[0_0_64px_rgba(0,0,0,0.5)] relative z-20 text-left text-left">
+        <div className="h-24 flex items-center px-10 border-b border-slate-800 bg-[#0d1424] shrink-0 text-left text-left">
+          <div className="w-14 h-14 rounded-[20px] bg-emerald-500/10 flex items-center justify-center mr-6 border border-emerald-500/20 shadow-inner shrink-0 transition-all hover:rotate-12 hover:scale-110 text-left"><BrainCircuit className="w-7 h-7 text-emerald-400" /></div>
+          <div className="text-left"><h2 className="font-black text-slate-100 text-[12px] tracking-[0.3em] uppercase leading-none mb-1.5 text-left text-left">KOSEN AI</h2><div className="flex items-center mt-1.5 text-left"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 mr-2.5 animate-pulse shadow-[0_0_12px_rgba(16,185,129,0.8)] text-left"></span><span className="text-[10px] text-emerald-500 font-black uppercase tracking-[0.2em] opacity-80 text-left">Syncing Intelligence</span></div></div>
         </div>
-        <div className="flex-1 overflow-y-auto p-10 space-y-10 font-sans scrollbar-hide text-left">
+        <div className="flex-1 overflow-y-auto p-10 space-y-10 font-sans scrollbar-hide text-left text-left text-left">
           {chatMessages.map((msg) => (
-            <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-500 text-left`}>
-              <div className={`max-w-[95%] rounded-[32px] p-6 leading-relaxed shadow-2xl text-base whitespace-pre-wrap font-medium text-left ${msg.sender === 'user' ? 'bg-emerald-600 text-white rounded-tr-none shadow-emerald-900/30' : 'bg-[#161f33] text-slate-200 border border-slate-800 rounded-tl-none border-l-[5px] border-l-emerald-500 shadow-black/50'}`}>{msg.text}</div>
+            <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-500 text-left text-left text-left`}>
+              <div className={`max-w-[95%] rounded-[32px] p-6 leading-relaxed shadow-xl text-base whitespace-pre-wrap font-medium text-left ${msg.sender === 'user' ? 'bg-emerald-600 text-white rounded-tr-none shadow-emerald-900/30' : 'bg-[#161f33] text-slate-200 border border-slate-800 rounded-tl-none border-l-[5px] border-l-emerald-500 shadow-black/50'}`}>{msg.text}</div>
             </div>
           ))}
           {isChatLoading && (
-            <div className="flex justify-start animate-in fade-in duration-500 text-left">
-              <div className="bg-[#161f33] text-slate-500 border border-slate-800 rounded-[32px] rounded-tl-none p-6 flex flex-col items-start gap-4 shadow-2xl min-w-[200px]">
-                <div className="flex items-center space-x-4"><Loader2 className="w-5 h-5 animate-spin text-emerald-500" /><span className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-600">Cognitive Load...</span></div>
-                <div className="w-56 h-2 bg-slate-800/50 rounded-full overflow-hidden relative shadow-inner"><div className="absolute h-full bg-emerald-500/40 animate-[progress_2s_ease-in-out_infinite] w-2/3"></div></div>
+            <div className="flex justify-start animate-in fade-in duration-500 text-left text-left">
+              <div className="bg-[#161f33] text-slate-500 border border-slate-800 rounded-[32px] rounded-tl-none p-6 flex flex-col items-start gap-4 shadow-2xl min-w-[200px] text-left">
+                <div className="flex items-center space-x-4 text-left"><Loader2 className="w-5 h-5 animate-spin text-emerald-500" /><span className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-600 text-left">Cognitive Load...</span></div>
+                <div className="w-56 h-2 bg-slate-800/50 rounded-full overflow-hidden relative shadow-inner text-left"><div className="absolute h-full bg-emerald-500/40 animate-[progress_2s_ease-in-out_infinite] w-2/3 text-left"></div></div>
               </div>
             </div>
           )}
           <div ref={chatEndRef} />
         </div>
-        <div className="p-10 border-t border-slate-800 bg-[#0d1424] shrink-0 text-left">
-          <form onSubmit={handleSendMessage} className="relative group text-left">
-            <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Consult the expert AI..." disabled={isChatLoading} className="w-full bg-[#161f33] border border-slate-800 border-b-[4px] border-b-slate-700 text-sm rounded-[24px] pl-7 pr-16 py-5 focus:outline-none focus:border-emerald-500 focus:border-b-emerald-600 transition-all font-black shadow-inner placeholder:text-slate-800" />
-            <button type="submit" disabled={isChatLoading || !chatInput.trim()} className="absolute right-3.5 top-3.5 p-4 bg-emerald-600 text-white rounded-[18px] hover:bg-emerald-500 shadow-2xl active:scale-75 transition-all disabled:opacity-20"><Send className="w-5 h-5" /></button>
+        <div className="p-10 border-t border-slate-800 bg-[#0d1424] shrink-0 text-left text-left">
+          <form onSubmit={handleSendMessage} className="relative group text-left text-left">
+            <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Consult the expert AI..." disabled={isChatLoading} className="w-full bg-[#161f33] border border-slate-800 border-b-[4px] border-b-slate-700 text-sm rounded-[24px] pl-7 pr-16 py-5 focus:outline-none focus:border-emerald-500 focus:border-b-emerald-600 transition-all font-black shadow-inner placeholder:text-slate-800 text-left" />
+            <button type="submit" disabled={isChatLoading || !chatInput.trim()} className="absolute right-3.5 top-3.5 p-4 bg-emerald-600 text-white rounded-[18px] hover:bg-emerald-500 shadow-2xl active:scale-75 transition-all disabled:opacity-20 text-left"><Send className="w-5 h-5" /></button>
           </form>
         </div>
       </aside>
