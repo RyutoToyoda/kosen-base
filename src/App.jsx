@@ -27,7 +27,7 @@ import {
 // =========================================================================
 
 // 1. 以下の1行のコメントアウトを外してSupabaseを読み込む
-// import { supabase } from './supabaseClient';
+import { supabase } from './supabaseClient';
 
 // --- プレビュー用ダミー（本番デプロイ時はこのままでも無視されますが、消してもOKです） ---
 const supabase = {
