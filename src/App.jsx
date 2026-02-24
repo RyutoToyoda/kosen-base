@@ -308,7 +308,7 @@ export default function App() {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {notes.map(note => (
-                    <div key={note.id} className="bg-[#11192a] border border-slate-800 rounded-2xl p-6 hover:border-emerald-500/50 hover:bg-[#162136] transition-all duration-300 cursor-pointer group flex flex-col shadow-xl min-h-[300px]">
+                    <div key={note.id} className="bg-[#11192a] border border-slate-800 rounded-2xl p-6 hover:border-emerald-500/50 hover:bg-[#162136] transition-all duration-300 cursor-pointer group flex flex-col shadow-xl h-full min-h-[260px]">
                       <div className="flex justify-between items-start mb-4 shrink-0">
                         <span className="text-[10px] font-black px-2.5 py-1 rounded bg-[#1e293b] text-emerald-400 border border-emerald-500/20 uppercase tracking-tighter shadow-sm">
                           {note.subject}
@@ -319,10 +319,10 @@ export default function App() {
                       </div>
                       
                       <div className="flex-1 mb-4 flex flex-col justify-start overflow-hidden">
-                        <h3 className="text-lg font-bold text-white mb-2 group-hover:text-emerald-400 transition-colors leading-snug">
+                        <h3 className="text-lg font-bold text-white mb-2 group-hover:text-emerald-400 transition-colors leading-snug line-clamp-2">
                           {note.title}
                         </h3>
-                        <p className="text-sm text-slate-400 leading-relaxed font-medium">
+                        <p className="text-sm text-slate-400 leading-relaxed font-medium line-clamp-3">
                           {note.preview}
                         </p>
                       </div>
