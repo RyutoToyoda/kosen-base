@@ -24,7 +24,7 @@ import {
 // 【ステップ1】データベース (Supabase) を有効にする
 // Vercelで本物のデータを取得するために、以下の1行の先頭の「// 」を消してください。
 // =========================================================================
-// import { supabase } from './supabaseClient';
+import { supabase } from './supabaseClient';
 
 // --- プレビュー用ダミーデータ（本番デプロイ時はこのままでも無視されるのでOKです） ---
 const supabase = {
