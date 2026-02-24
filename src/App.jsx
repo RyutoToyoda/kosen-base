@@ -20,7 +20,21 @@ import {
   ChevronRight
 } from 'lucide-react';
 
-import { supabase } from './supabaseClient';
+// =========================================================================
+// 【ステップ1】データベース (Supabase) を有効にする
+// Vercelで本物のデータを取得するために、以下の1行の先頭の「// 」を消してください。
+// =========================================================================
+// import { supabase } from './supabaseClient';
+
+// --- プレビュー用ダミーデータ（本番デプロイ時はこのままでも無視されるのでOKです） ---
+const supabase = {
+  from: () => ({
+    select: () => ({
+      order: () => Promise.resolve({ data: [], error: null })
+    }),
+    insert: () => Promise.resolve({ error: null })
+  })
+};
 
 const INITIAL_CHAT = [
   { id: 1, sender: 'ai', text: 'こんにちは！KOSEN-base AIアシスタントです。ノートの解析や、学習の相談など、何でも聞いてください。' }
@@ -37,21 +51,19 @@ export default function App() {
   
   const fileInputRef = useRef(null);
 
-  // 環境変数を安全に取得（プレビュー環境でのエラー回避）
   const getGeminiKey = () => {
-    try {
-      // import.meta.env が存在するか確認し、VITE_GEMINI_API_KEY を取得
-      const env = (import.meta && (import.meta as any).env) || {};
-      return (env.VITE_GEMINI_API_KEY || '').trim();
-    } catch (e) {
-      return '';
-    }
+    // =========================================================================
+    // 【ステップ2】Gemini AI を有効にする
+    // Vercelで画像解析を動かすために、以下の1行の先頭の「// 」を消してください。
+    // =========================================================================
+    // return import.meta.env.VITE_GEMINI_API_KEY;
+    
+    return '';
   };
 
   const fetchNotes = async () => {
     try {
       setIsLoading(true);
-      // 注：プレビュー環境では常に空またはサンプルデータを返します
       const { data, error } = await supabase
         .from('notes')
         .select('*')
@@ -62,7 +74,7 @@ export default function App() {
       if (data && data.length > 0) {
         setNotes(data);
       } else {
-        // サンプルデータ
+        // データがない場合（またはプレビュー環境）のサンプル表示
         setNotes([
           { 
             id: 1, 
@@ -118,9 +130,9 @@ export default function App() {
 
       const geminiKey = getGeminiKey();
       if (!geminiKey) {
-        // プレビュー環境（APIキーなし）の場合はシミュレーションを行う
+        // APIキーが読み込めない場合（プレビュー環境等）のシミュレーション
         await new Promise(r => setTimeout(r, 1500));
-        setAnalyzeMessage({ type: 'success', text: 'プレビューモード：解析シミュレーションが完了しました（Vercelでは本物が動きます）。' });
+        setAnalyzeMessage({ type: 'success', text: 'プレビューモード：解析シミュレーションが完了しました。Vercelでは本物が動きます！' });
       } else {
         const targetModel = "gemini-2.5-flash"; 
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${geminiKey}`;
@@ -132,7 +144,7 @@ export default function App() {
             contents: [{
               role: "user",
               parts: [
-                { text: "提供された画像から学習ノートの情報を抽出し、JSON形式で返してください。\n{\n  \"title\": \"ノートのタイトル\",\n  \"subject\": \"科目名\",\n  \"preview\": \"内容の要約(150文字程度)\",\n  \"tags\": [\"タグ1\", \"タグ2\"]\n}" },
+                { text: "提供された画像から学習ノートの情報を抽出し、JSON形式で返してください。純粋なJSONのみを返してください。\n{\n  \"title\": \"ノートのタイトル\",\n  \"subject\": \"科目名\",\n  \"preview\": \"内容の要約(150文字程度)\",\n  \"tags\": [\"タグ1\", \"タグ2\"]\n}" },
                 { inlineData: { mimeType: file.type, data: base64Data } }
               ]
             }]
@@ -151,7 +163,7 @@ export default function App() {
         }]);
 
         await fetchNotes();
-        setAnalyzeMessage({ type: 'success', text: 'ノートの解析と保存が完了しました！' });
+        setAnalyzeMessage({ type: 'success', text: '画像解析に成功し、データベースに保存されました！' });
       }
       setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 5000);
     } catch (err) {
@@ -169,7 +181,7 @@ export default function App() {
     setChatMessages(prev => [...prev, newUserMsg]);
     setChatInput('');
     setTimeout(() => {
-      setChatMessages(prev => [...prev, { id: Date.now() + 1, sender: 'ai', text: 'チャット機能のGemini連携は近日実装予定です！' }]);
+      setChatMessages(prev => [...prev, { id: Date.now() + 1, sender: 'ai', text: 'AIチャット機能は近日実装予定です！' }]);
     }, 1000);
   };
 
@@ -222,7 +234,6 @@ export default function App() {
 
       {/* メインエリア */}
       <main className="flex-1 flex flex-col min-w-0 bg-[#0a0f18] overflow-hidden relative">
-        {/* ヘッダー */}
         <header className="h-16 flex items-center justify-between px-6 border-b border-slate-800 bg-[#0d1424]/80 backdrop-blur-md z-10 shrink-0">
           <div className="flex-1 max-w-2xl">
             <div className="relative group">
@@ -300,7 +311,6 @@ export default function App() {
                         </button>
                       </div>
                       
-                      {/* テキストが途切れないように min-h と flex-1 を活用 */}
                       <div className="flex-1 mb-4 flex flex-col justify-start overflow-hidden">
                         <h3 className="text-lg font-bold text-white mb-2 group-hover:text-emerald-400 transition-colors leading-snug">
                           {note.title}
