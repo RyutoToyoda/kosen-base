@@ -21,7 +21,8 @@ import {
   Trash2,
   LogOut,
   User,
-  ArrowLeft
+  ArrowLeft,
+  X
 } from 'lucide-react';
 
 // =========================================================================
@@ -30,7 +31,6 @@ import {
 // =========================================================================
 import { createClient } from '@supabase/supabase-js';
 
-// Viteのビルドで確実に環境変数が置換されるように、最もシンプルな形で読み込みます
 let supabaseUrl = '';
 let supabaseAnonKey = '';
 let globalGeminiKey = '';
@@ -60,7 +60,7 @@ if (isSupabaseReady) {
       signInWithPassword: () => Promise.resolve({ error: null }),
       signUp: () => Promise.resolve({ error: null }),
       signOut: () => Promise.resolve({ error: null }),
-      updateUser: () => Promise.resolve({ error: null, data: { user: {} } }) // モック追加
+      updateUser: () => Promise.resolve({ error: null, data: { user: {} } })
     },
     from: () => ({
       select: () => ({
@@ -96,15 +96,13 @@ export default function App() {
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   
-  // ノート手動追加用
+  // 新規追加：ノート詳細表示用のステート
+  const [selectedNote, setSelectedNote] = useState(null);
+  
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newNote, setNewNote] = useState({ title: '', subject: '', preview: '', tags: '' });
   const [isAdding, setIsAdding] = useState(false);
-
-  // マイノートの科目選択用
   const [selectedSubject, setSelectedSubject] = useState(null);
-
-  // プロフィール設定用
   const [profileForm, setProfileForm] = useState({ kosen: '', department: '', grade: '' });
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isProfileUpdating, setIsProfileUpdating] = useState(false);
@@ -112,7 +110,6 @@ export default function App() {
   const fileInputRef = useRef(null);
   const chatEndRef = useRef(null);
 
-  // 認証状態の監視とプロフィールの初期設定
   useEffect(() => {
     if (isSupabaseReady) {
       supabase.auth.getSession().then(({ data: { session } }) => {
@@ -130,22 +127,13 @@ export default function App() {
     }
   }, []);
 
-  // セッション更新時にメタデータを読み込む
   const handleSessionUpdate = (currentSession) => {
     setSession(currentSession);
     if (currentSession?.user?.user_metadata) {
       const meta = currentSession.user.user_metadata;
-      setProfileForm({
-        kosen: meta.kosen || '',
-        department: meta.department || '',
-        grade: meta.grade || ''
-      });
-      // 初回登録判定：高専名が設定されていなければモーダルを開く
-      if (!meta.kosen) {
-        setIsProfileModalOpen(true);
-      }
+      setProfileForm({ kosen: meta.kosen || '', department: meta.department || '', grade: meta.grade || '' });
+      if (!meta.kosen) setIsProfileModalOpen(true);
     } else if (currentSession) {
-      // メタデータが完全に空の場合も開く
       setIsProfileModalOpen(true);
     }
   };
@@ -153,11 +141,7 @@ export default function App() {
   const fetchNotes = async () => {
     try {
       setIsLoading(true);
-      const { data, error } = await supabase
-        .from('notes')
-        .select('*')
-        .order('date', { ascending: false });
-
+      const { data, error } = await supabase.from('notes').select('*').order('date', { ascending: false });
       if (error) throw error;
       if (data && data.length > 0) setNotes(data);
       else setNotes([]);
@@ -169,55 +153,38 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (session) {
-      fetchNotes();
-    } else {
-      setNotes([]);
-      setProfileForm({ kosen: '', department: '', grade: '' });
-    }
+    if (session) fetchNotes();
+    else { setNotes([]); setProfileForm({ kosen: '', department: '', grade: '' }); }
   }, [session]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, isChatLoading]);
 
-  // --- プロフィール更新処理 ---
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
     setIsProfileUpdating(true);
     try {
       if (isSupabaseReady) {
-        const { data, error } = await supabase.auth.updateUser({
-          data: { 
-            kosen: profileForm.kosen, 
-            department: profileForm.department, 
-            grade: profileForm.grade 
-          }
-        });
+        const { data, error } = await supabase.auth.updateUser({ data: { kosen: profileForm.kosen, department: profileForm.department, grade: profileForm.grade } });
         if (error) throw error;
-        setSession({ ...session, user: data.user }); // ローカルセッションを更新
+        setSession({ ...session, user: data.user });
       } else {
-        // モック時の動作
         await new Promise(r => setTimeout(r, 1000));
         setSession({ ...session, user: { ...session.user, user_metadata: profileForm } });
       }
       setIsProfileModalOpen(false);
-      
       if (activeView === 'settings') {
         setAnalyzeMessage({ type: 'success', text: 'プロフィールを更新しました。' });
         setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 3000);
       }
     } catch (err) {
-      console.error(err);
-      if (activeView === 'settings') {
-        setAnalyzeMessage({ type: 'error', text: 'プロフィールの更新に失敗しました。' });
-      }
+      if (activeView === 'settings') setAnalyzeMessage({ type: 'error', text: 'プロフィールの更新に失敗しました。' });
     } finally {
       setIsProfileUpdating(false);
     }
   };
 
-  // --- 認証機能 ---
   const handleSignUp = async (e) => {
     e.preventDefault();
     if (!email || !password) return setAuthError('入力してください。');
@@ -257,7 +224,6 @@ export default function App() {
     else setSession(null);
   };
 
-  // --- ノート操作 ---
   const filteredNotes = notes.filter(note => {
     const q = searchQuery.toLowerCase();
     return (
@@ -277,6 +243,8 @@ export default function App() {
       if (error) throw error;
       setNotes(prev => prev.filter(n => n.id !== id));
       setAnalyzeMessage({ type: 'success', text: 'ノートを削除しました。' });
+      // 詳細画面を開いている最中に削除した場合、詳細画面を閉じる
+      if (selectedNote?.id === id) setSelectedNote(null);
     } catch (err) {
       setAnalyzeMessage({ type: 'error', text: `削除エラー: ${err.message}` });
     } finally {
@@ -312,7 +280,7 @@ export default function App() {
     setIsAnalyzing(true); setAnalyzeMessage({ type: null, text: null });
     try {
       if (!isCreateClientImported) throw new Error("コメントアウトが外されていません。");
-      if (!hasEnvVars) throw new Error("環境変数が読み込めていません。VercelでRedeployを行ってください。");
+      if (!hasEnvVars) throw new Error("環境変数が読み込めていません。");
       const base64Data = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result.split(',')[1]);
@@ -366,9 +334,13 @@ export default function App() {
     finally { setIsChatLoading(false); }
   };
 
-  // --- ノートのカードUIコンポーネント（共通化） ---
+  // --- ノートのカードUIコンポーネント ---
   const renderNoteCard = (note) => (
-    <div key={note.id} className="bg-[#11192a] border border-slate-800 rounded-2xl p-6 hover:border-emerald-500/50 hover:bg-[#162136] transition-all duration-300 cursor-pointer group flex flex-col shadow-xl h-full min-h-[260px] relative">
+    <div 
+      key={note.id} 
+      onClick={() => setSelectedNote(note)} // クリックで詳細を開く
+      className="bg-[#11192a] border border-slate-800 rounded-2xl p-6 hover:border-emerald-500/50 hover:bg-[#162136] transition-all duration-300 cursor-pointer group flex flex-col shadow-xl h-full min-h-[260px] relative"
+    >
       <div className="flex justify-between items-start mb-4 shrink-0">
         <span className="text-[10px] font-black px-2.5 py-1 rounded bg-[#1e293b] text-emerald-400 border border-emerald-500/20 uppercase tracking-tighter shadow-sm">
           {note.subject}
@@ -463,11 +435,50 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen w-full bg-[#0a0f18] text-slate-200 font-sans overflow-hidden">
+    <div className="flex h-screen w-full bg-[#0a0f18] text-slate-200 font-sans overflow-hidden relative">
       {/* 画面外クリック検知 */}
       {menuOpenId && <div className="fixed inset-0 z-10" onClick={() => setMenuOpenId(null)}></div>}
 
-      {/* 初期プロフィール設定モーダル（スキップ不可） */}
+      {/* --- 新規追加：ノート詳細表示モーダル --- */}
+      {selectedNote && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+          <div className="bg-[#0d1424] border border-slate-700 rounded-3xl p-8 w-full max-w-2xl max-h-[85vh] shadow-2xl relative flex flex-col animate-in zoom-in-95 duration-300">
+            <div className="flex justify-between items-start mb-6 shrink-0 border-b border-slate-800 pb-4">
+              <div className="pr-4">
+                <span className="text-[10px] font-black px-2.5 py-1 rounded bg-[#1e293b] text-emerald-400 border border-emerald-500/20 uppercase tracking-tighter shadow-sm mb-3 inline-block">
+                  {selectedNote.subject}
+                </span>
+                <h2 className="text-2xl font-black text-white leading-snug">{selectedNote.title}</h2>
+              </div>
+              <button onClick={() => setSelectedNote(null)} className="p-2 bg-slate-800/50 hover:bg-slate-700 rounded-full text-slate-400 hover:text-white transition-colors shrink-0">
+                 <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto pr-2 scrollbar-hide">
+              <p className="text-slate-300 leading-relaxed whitespace-pre-wrap font-medium">
+                {selectedNote.preview}
+              </p>
+            </div>
+            
+            <div className="mt-6 pt-4 border-t border-slate-800/50 flex items-center justify-between shrink-0">
+              <div className="flex items-center text-xs text-slate-500 font-mono font-bold tracking-tight">
+                <Clock className="w-4 h-4 mr-2 text-emerald-500/60" />
+                {selectedNote.date}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {selectedNote.tags?.map((tag, idx) => (
+                  <span key={idx} className="text-[10px] font-black px-2.5 py-1 rounded-full bg-[#1e293b] text-slate-300 border border-slate-700/50">
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 初期プロフィール設定モーダル */}
       {isProfileModalOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-300">
           <div className="bg-[#0d1424] border border-slate-700 rounded-3xl p-8 w-full max-w-md shadow-2xl relative animate-in zoom-in-95 duration-500">
@@ -639,7 +650,6 @@ export default function App() {
           {activeView === 'notes' && (
             <div className="max-w-7xl mx-auto animate-in slide-in-from-bottom duration-500">
               {!selectedSubject ? (
-                // 科目一覧（フォルダ）表示
                 <div className="text-center py-12">
                   <div className="w-24 h-24 bg-emerald-500/10 rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-inner border border-emerald-500/20">
                     <BookOpen className="w-12 h-12 text-emerald-500" />
@@ -674,7 +684,6 @@ export default function App() {
                   )}
                 </div>
               ) : (
-                // 選択した科目のノート一覧
                 <div className="animate-in fade-in duration-300">
                   <button onClick={() => setSelectedSubject(null)} className="flex items-center text-slate-400 hover:text-emerald-400 font-bold text-sm mb-6 transition-colors group">
                     <ArrowLeft className="w-5 h-5 mr-1 group-hover:-translate-x-1 transition-transform" />
