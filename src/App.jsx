@@ -17,18 +17,16 @@ import {
   CheckCircle2,
   Download,
   Clock,
-  ChevronRight
+  ChevronRight,
+  Trash2
 } from 'lucide-react';
 
 // =========================================================================
 // 【重要】本番環境（Vercel）で動かすための最終ステップ
-// =========================================================================
-// このプレビュー画面でのエラーを防ぐため、以下の1行をコメントアウトしています。
 // Vercelにアップロードする前に、必ず先頭の「// 」を消して有効にしてください！
 // =========================================================================
 import { createClient } from '@supabase/supabase-js';
 
-// 環境変数をエラーなく安全に取得する関数
 const getEnvVar = (key) => {
   try {
     return import.meta.env[key] || '';
@@ -42,26 +40,25 @@ const supabaseAnonKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
 
 let supabase;
 
-// Vercelで環境変数が設定されており、かつ createClient がインポートされている場合は本物を使用
 const isSupabaseReady = supabaseUrl && supabaseAnonKey && typeof createClient !== 'undefined';
 
 if (isSupabaseReady) {
   // @ts-ignore
   supabase = createClient(supabaseUrl, supabaseAnonKey);
 } else {
-  // プレビュー用・未設定時用のダミーデータ（エラー回避用）
   supabase = {
     from: () => ({
       select: () => ({
         order: () => Promise.resolve({ data: [], error: null })
       }),
-      insert: () => Promise.resolve({ error: null })
+      insert: () => Promise.resolve({ error: null }),
+      delete: () => ({ eq: () => Promise.resolve({ error: null }) }) // 削除用のモック追加
     })
   };
 }
 
 const INITIAL_CHAT = [
-  { id: 1, sender: 'ai', text: 'こんにちは！KOSEN-base AIアシスタントです。ノートの解析や、学習の相談など、何でも聞いてください。' }
+  { id: 1, sender: 'ai', text: 'こんにちは！KOSEN-base AIアシスタントです。学習の質問やノート内容の深掘りなど、何でも聞いてください。' }
 ];
 
 export default function App() {
@@ -70,11 +67,18 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzeMessage, setAnalyzeMessage] = useState({ type: null, text: null });
+  
+  // 新機能用のステート
+  const [searchQuery, setSearchQuery] = useState('');
+  const [menuOpenId, setMenuOpenId] = useState(null);
   const [chatMessages, setChatMessages] = useState(INITIAL_CHAT);
   const [chatInput, setChatInput] = useState('');
+  const [isChatLoading, setIsChatLoading] = useState(false);
   
   const fileInputRef = useRef(null);
+  const chatEndRef = useRef(null);
 
+  // 📝 ノートの取得
   const fetchNotes = async () => {
     try {
       setIsLoading(true);
@@ -88,7 +92,6 @@ export default function App() {
       if (data && data.length > 0) {
         setNotes(data);
       } else {
-        // データがまだ無い場合の初期表示サンプル
         setNotes([
           { 
             id: 1, 
@@ -100,11 +103,19 @@ export default function App() {
           },
           { 
             id: 2, 
-            title: "アルゴリズムとデータ構造：二分探索ツリーの実装", 
+            title: "アルゴリズムとデータ構造：二分探索ツリーの実装と計算量", 
             subject: "情報", 
             date: "2026-02-22", 
             preview: "再帰を用いた探索アルゴリズム。最良ケースO(log n)と最悪ケースO(n)の違い、および平衡木の必要性について。C言語でのポインタ操作を含みます。", 
             tags: ["C言語", "演習"] 
+          },
+          { 
+            id: 3, 
+            title: "応用物理 剛体の力学：慣性モーメントの導出と平行軸の定理", 
+            subject: "物理", 
+            date: "2026-02-20", 
+            preview: "円盤および棒の慣性モーメントを積分により導出する過程。平行軸の定理を用いることで、重心を通らない軸周りの回転運動方程式を簡略化する手法について。", 
+            tags: ["剛体", "レポート"] 
           }
         ]);
       }
@@ -119,6 +130,47 @@ export default function App() {
     fetchNotes();
   }, []);
 
+  // チャットの自動スクロール
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages, isChatLoading]);
+
+  // 🔍 検索フィルター機能
+  const filteredNotes = notes.filter(note => {
+    const q = searchQuery.toLowerCase();
+    return (
+      (note.title && note.title.toLowerCase().includes(q)) ||
+      (note.subject && note.subject.toLowerCase().includes(q)) ||
+      (note.preview && note.preview.toLowerCase().includes(q)) ||
+      (note.tags && note.tags.some(t => t.toLowerCase().includes(q)))
+    );
+  });
+
+  // 🗑️ ノートの削除機能
+  const deleteNote = async (id) => {
+    if (!window.confirm("このノートを完全に削除しますか？")) {
+      setMenuOpenId(null);
+      return;
+    }
+    
+    try {
+      if (isSupabaseReady) {
+        const { error } = await supabase.from('notes').delete().eq('id', id);
+        if (error) throw error;
+      }
+      
+      setNotes(prev => prev.filter(n => n.id !== id));
+      setAnalyzeMessage({ type: 'success', text: 'ノートを削除しました。' });
+    } catch (err) {
+      console.error("Delete Error:", err);
+      setAnalyzeMessage({ type: 'error', text: `削除エラー: ${err.message}` });
+    } finally {
+      setMenuOpenId(null);
+      setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 3000);
+    }
+  };
+
+  // 📸 画像アップロード & 解析
   const handleImageUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -181,15 +233,53 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = (e) => {
+  // 🤖 AIチャット送信機能
+  const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!chatInput.trim()) return;
-    const newUserMsg = { id: Date.now(), sender: 'user', text: chatInput };
+    if (!chatInput.trim() || isChatLoading) return;
+
+    const userText = chatInput.trim();
+    const newUserMsg = { id: Date.now(), sender: 'user', text: userText };
     setChatMessages(prev => [...prev, newUserMsg]);
     setChatInput('');
-    setTimeout(() => {
-      setChatMessages(prev => [...prev, { id: Date.now() + 1, sender: 'ai', text: 'AIチャット機能は近日実装予定です！' }]);
-    }, 1000);
+    setIsChatLoading(true);
+
+    try {
+      const geminiKey = getEnvVar('VITE_GEMINI_API_KEY');
+      if (!geminiKey) {
+        // キーがない場合のモック返答
+        await new Promise(r => setTimeout(r, 1000));
+        setChatMessages(prev => [...prev, { id: Date.now() + 1, sender: 'ai', text: 'APIキーが設定されていないため、デモモードで動作しています。Vercelで環境変数を設定すると、本物のAIが応答します！' }]);
+        setIsChatLoading(false);
+        return;
+      }
+
+      const targetModel = "gemini-2.5-flash"; 
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${geminiKey}`;
+      
+      const prompt = `あなたは高専生をサポートする優秀なAIアシスタント「KOSEN AI」です。理数系科目やプログラミングの質問に対して、分かりやすく、かつ専門的に答えてください。
+      ユーザーの質問: ${userText}`;
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }]
+        })
+      });
+
+      if (!response.ok) throw new Error("API通信エラー");
+      
+      const result = await response.json();
+      const aiText = result.candidates[0].content.parts[0].text;
+
+      setChatMessages(prev => [...prev, { id: Date.now() + 1, sender: 'ai', text: aiText }]);
+    } catch (err) {
+      console.error("Chat Error:", err);
+      setChatMessages(prev => [...prev, { id: Date.now() + 1, sender: 'ai', text: "すみません、エラーが発生しました。時間を置いて再度お試しください。" }]);
+    } finally {
+      setIsChatLoading(false);
+    }
   };
 
   const menuItems = [
@@ -202,8 +292,13 @@ export default function App() {
   return (
     <div className="flex h-screen w-full bg-[#0a0f18] text-slate-200 font-sans overflow-hidden">
       
+      {/* 画面全体をクリックしたときにメニューを閉じる透明なオーバーレイ */}
+      {menuOpenId && (
+        <div className="fixed inset-0 z-10" onClick={() => setMenuOpenId(null)}></div>
+      )}
+
       {/* サイドバー */}
-      <aside className="w-64 bg-[#0d1424] border-r border-slate-800 flex flex-col hidden md:flex">
+      <aside className="w-64 bg-[#0d1424] border-r border-slate-800 flex flex-col hidden md:flex z-20">
         <div className="h-16 flex items-center px-6 border-b border-slate-800">
           <GraduationCap className="w-8 h-8 text-emerald-500 mr-3" />
           <h1 className="text-xl font-bold text-white tracking-wider uppercase">KOSEN-base</h1>
@@ -240,13 +335,15 @@ export default function App() {
       </aside>
 
       {/* メインエリア */}
-      <main className="flex-1 flex flex-col min-w-0 bg-[#0a0f18] overflow-hidden relative">
-        <header className="h-16 flex items-center justify-between px-6 border-b border-slate-800 bg-[#0d1424]/80 backdrop-blur-md z-10 shrink-0">
+      <main className="flex-1 flex flex-col min-w-0 bg-[#0a0f18] overflow-hidden relative z-20">
+        <header className="h-16 flex items-center justify-between px-6 border-b border-slate-800 bg-[#0d1424]/80 backdrop-blur-md shrink-0">
           <div className="flex-1 max-w-2xl">
             <div className="relative group">
               <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 group-focus-within:text-emerald-500 transition-colors" />
               <input 
                 type="text" 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="ノートや過去問を検索..." 
                 className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm font-medium"
               />
@@ -272,7 +369,7 @@ export default function App() {
         
         {/* 通知エリア */}
         {analyzeMessage.text && (
-          <div className="px-6 pt-4 shrink-0 absolute top-16 left-0 right-0 z-20">
+          <div className="px-6 pt-4 shrink-0 absolute top-16 left-0 right-0 z-30">
             <div className={`border px-4 py-3 rounded-lg flex items-start space-x-3 shadow-2xl animate-in slide-in-from-top duration-300 ${
               analyzeMessage.type === 'error' ? 'bg-red-950/90 border-red-800 text-red-200' : 'bg-emerald-950/90 border-emerald-800 text-emerald-200'
             }`}>
@@ -293,7 +390,7 @@ export default function App() {
               <div className="flex items-center justify-between mb-8">
                 <h2 className="text-2xl font-black text-white flex items-center tracking-tight">
                   <LayoutDashboard className="w-6 h-6 mr-3 text-emerald-500" />
-                  最近のノート
+                  {searchQuery ? `「${searchQuery}」の検索結果` : '最近のノート'}
                 </h2>
                 <div className="text-sm text-slate-500 font-bold flex items-center hover:text-emerald-400 cursor-pointer transition-colors group">
                   すべて表示 <ChevronRight className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" />
@@ -305,17 +402,40 @@ export default function App() {
                   <Loader2 className="w-10 h-10 animate-spin text-emerald-500 mb-4" />
                   <p className="text-xs font-black uppercase tracking-widest opacity-50">Syncing with database...</p>
                 </div>
+              ) : filteredNotes.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-slate-800 rounded-3xl text-slate-500">
+                  <Search className="w-12 h-12 mb-4 opacity-20" />
+                  <p className="font-bold">ノートが見つかりませんでした</p>
+                </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {notes.map(note => (
-                    <div key={note.id} className="bg-[#11192a] border border-slate-800 rounded-2xl p-6 hover:border-emerald-500/50 hover:bg-[#162136] transition-all duration-300 cursor-pointer group flex flex-col shadow-xl h-full min-h-[260px]">
+                  {filteredNotes.map(note => (
+                    <div key={note.id} className="bg-[#11192a] border border-slate-800 rounded-2xl p-6 hover:border-emerald-500/50 hover:bg-[#162136] transition-all duration-300 cursor-pointer group flex flex-col shadow-xl h-full min-h-[260px] relative">
                       <div className="flex justify-between items-start mb-4 shrink-0">
                         <span className="text-[10px] font-black px-2.5 py-1 rounded bg-[#1e293b] text-emerald-400 border border-emerald-500/20 uppercase tracking-tighter shadow-sm">
                           {note.subject}
                         </span>
-                        <button className="p-1.5 hover:bg-slate-700 rounded-lg transition-colors text-slate-600 hover:text-slate-200">
-                          <MoreVertical className="w-4 h-4" />
-                        </button>
+                        
+                        {/* 削除メニュー */}
+                        <div className="relative z-20">
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === note.id ? null : note.id); }}
+                            className="p-1.5 hover:bg-slate-700 rounded-lg transition-colors text-slate-600 hover:text-slate-200"
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </button>
+                          {menuOpenId === note.id && (
+                            <div className="absolute right-0 top-8 w-32 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); deleteNote(note.id); }}
+                                className="w-full text-left px-4 py-3 text-xs font-bold text-red-400 hover:bg-red-500/10 transition-colors flex items-center"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 mr-2" />
+                                削除する
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                       
                       <div className="flex-1 mb-4 flex flex-col justify-start overflow-hidden">
@@ -462,7 +582,7 @@ export default function App() {
         <div className="flex-1 overflow-y-auto p-6 space-y-6 font-sans scrollbar-hide">
           {chatMessages.map((msg) => (
             <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in zoom-in duration-300`}>
-              <div className={`max-w-[90%] rounded-2xl p-4 leading-relaxed shadow-xl text-sm ${
+              <div className={`max-w-[90%] rounded-2xl p-4 leading-relaxed shadow-xl text-sm whitespace-pre-wrap ${
                 msg.sender === 'user' 
                   ? 'bg-emerald-600 text-white rounded-tr-none font-medium' 
                   : 'bg-[#161f33] text-slate-200 border border-slate-700/50 rounded-tl-none font-medium'
@@ -471,6 +591,17 @@ export default function App() {
               </div>
             </div>
           ))}
+          {/* ローディング表示 */}
+          {isChatLoading && (
+            <div className="flex justify-start animate-in fade-in duration-300">
+              <div className="bg-[#161f33] text-slate-400 border border-slate-700/50 rounded-2xl rounded-tl-none p-4 flex items-center space-x-2">
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
+                <span className="text-xs font-bold">考え中...</span>
+              </div>
+            </div>
+          )}
+          {/* 自動スクロールの着地点 */}
+          <div ref={chatEndRef} />
         </div>
 
         <div className="p-6 border-t border-slate-800 bg-[#0d1424]">
@@ -480,9 +611,14 @@ export default function App() {
               value={chatInput} 
               onChange={(e) => setChatInput(e.target.value)} 
               placeholder="AIに学習内容を質問..." 
-              className="w-full bg-[#161f33] border border-slate-700 text-xs rounded-2xl pl-5 pr-12 py-4 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder:text-slate-600 shadow-inner" 
+              disabled={isChatLoading}
+              className="w-full bg-[#161f33] border border-slate-700 text-xs rounded-2xl pl-5 pr-12 py-4 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder:text-slate-600 shadow-inner disabled:opacity-50" 
             />
-            <button type="submit" className="absolute right-2.5 top-2.5 p-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-500 transition-all shadow-lg active:scale-90">
+            <button 
+              type="submit" 
+              disabled={isChatLoading || !chatInput.trim()}
+              className="absolute right-2.5 top-2.5 p-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-500 transition-all shadow-lg active:scale-90 disabled:opacity-50 disabled:hover:bg-emerald-600"
+            >
               <Send className="w-4 h-4" />
             </button>
           </form>
