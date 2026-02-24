@@ -21,23 +21,44 @@ import {
 } from 'lucide-react';
 
 // =========================================================================
-// 【重要：本番環境（Vercel）へのデプロイ準備】
-// プレビュー環境でのエラーを防ぐため、現在はダミーデータを使用しています。
-// Vercelにプッシュする前に、必ず以下の2箇所のコメントアウト（//）を外してください。
+// 【重要】本番環境（Vercel）で動かすための最終ステップ
 // =========================================================================
+// このプレビュー画面でのエラーを防ぐため、以下の1行をコメントアウトしています。
+// Vercelにアップロードする前に、必ず先頭の「// 」を消して有効にしてください！
+// =========================================================================
+import { createClient } from '@supabase/supabase-js';
 
-// 1. 以下の1行のコメントアウトを外してSupabaseを読み込む
-import { supabase } from './supabaseClient';
-
-// --- プレビュー用ダミー（本番デプロイ時はこのままでも無視されますが、消してもOKです） ---
-const supabase = {
-  from: () => ({
-    select: () => ({
-      order: () => Promise.resolve({ data: [], error: null })
-    }),
-    insert: () => Promise.resolve({ error: null })
-  })
+// 環境変数をエラーなく安全に取得する関数
+const getEnvVar = (key) => {
+  try {
+    return import.meta.env[key] || '';
+  } catch (e) {
+    return '';
+  }
 };
+
+const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
+const supabaseAnonKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
+
+let supabase;
+
+// Vercelで環境変数が設定されており、かつ createClient がインポートされている場合は本物を使用
+const isSupabaseReady = supabaseUrl && supabaseAnonKey && typeof createClient !== 'undefined';
+
+if (isSupabaseReady) {
+  // @ts-ignore
+  supabase = createClient(supabaseUrl, supabaseAnonKey);
+} else {
+  // プレビュー用・未設定時用のダミーデータ（エラー回避用）
+  supabase = {
+    from: () => ({
+      select: () => ({
+        order: () => Promise.resolve({ data: [], error: null })
+      }),
+      insert: () => Promise.resolve({ error: null })
+    })
+  };
+}
 
 const INITIAL_CHAT = [
   { id: 1, sender: 'ai', text: 'こんにちは！KOSEN-base AIアシスタントです。ノートの解析や、学習の相談など、何でも聞いてください。' }
@@ -54,13 +75,6 @@ export default function App() {
   
   const fileInputRef = useRef(null);
 
-  const getGeminiKey = () => {
-    // 2. 以下の1行のコメントアウトを外してGemini APIキーを読み込む
-    // return import.meta.env.VITE_GEMINI_API_KEY || '';
-    
-    return '';
-  };
-
   const fetchNotes = async () => {
     try {
       setIsLoading(true);
@@ -74,6 +88,7 @@ export default function App() {
       if (data && data.length > 0) {
         setNotes(data);
       } else {
+        // データがまだ無い場合の初期表示サンプル
         setNotes([
           { 
             id: 1, 
@@ -119,11 +134,10 @@ export default function App() {
         reader.readAsDataURL(file);
       });
 
-      const geminiKey = getGeminiKey();
+      const geminiKey = getEnvVar('VITE_GEMINI_API_KEY');
       if (!geminiKey) {
-        // APIキーがない場合のプレビュー動作用
         await new Promise(r => setTimeout(r, 1500));
-        setAnalyzeMessage({ type: 'success', text: 'プレビューモード：解析シミュレーションが完了しました。Vercelでは本物が動きます。' });
+        setAnalyzeMessage({ type: 'success', text: 'プレビューモード：Vercelで環境変数を設定すると本番保存されます。' });
       } else {
         const targetModel = "gemini-2.5-flash"; 
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${geminiKey}`;
