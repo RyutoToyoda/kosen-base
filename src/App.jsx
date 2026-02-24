@@ -32,17 +32,18 @@ import {
 // =========================================================================
 import { createClient } from '@supabase/supabase-js';
 
-let supabaseUrl = '';
-let supabaseAnonKey = '';
-let globalGeminiKey = '';
+// 一番安定して動作していた読み込み方に修正
+const getEnvVar = (key) => {
+  try {
+    return import.meta.env[key] || '';
+  } catch (e) {
+    return '';
+  }
+};
 
-try {
-  supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-  supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-  globalGeminiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
-} catch (error) {
-  console.log("プレビュー環境のため環境変数をスキップします");
-}
+const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
+const supabaseAnonKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
+const globalGeminiKey = getEnvVar('VITE_GEMINI_API_KEY');
 
 const isCreateClientImported = typeof createClient !== 'undefined';
 const hasEnvVars = !!(supabaseUrl && supabaseAnonKey);
@@ -77,6 +78,20 @@ const INITIAL_CHAT = [
   { id: 1, sender: 'ai', text: 'こんにちは！KOSEN-base AIアシスタントです。学習の質問やノート内容の深掘りなど、何でも聞いてください。' }
 ];
 
+// 環境変数やインポートの状況をチェックする共通関数
+const checkReadyState = () => {
+  if (!isCreateClientImported) {
+    throw new Error("28行目のコメントアウト (import { createClient }...) が外されていません。");
+  }
+  const missing = [];
+  if (!supabaseUrl) missing.push("URL");
+  if (!supabaseAnonKey) missing.push("ANON_KEY");
+  
+  if (missing.length > 0) {
+    throw new Error(`Supabaseの ${missing.join(' と ')} がVercelから読み込めていません。Vercel上で「Redeploy」を実行してください。`);
+  }
+};
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -97,24 +112,18 @@ export default function App() {
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   
-  // ノート詳細表示用
   const [selectedNote, setSelectedNote] = useState(null);
-  
-  // AIによる専門分野活用推定用ステート
   const [relevanceAnalysis, setRelevanceAnalysis] = useState({ loading: false, text: null, error: null });
   
-  // 手動追加用
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newNote, setNewNote] = useState({ title: '', subject: '', preview: '', tags: '' });
   const [isAdding, setIsAdding] = useState(false);
   const [selectedSubject, setSelectedSubject] = useState(null);
   
-  // プロフィール用
   const [profileForm, setProfileForm] = useState({ kosen: '', department: '', grade: '' });
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isProfileUpdating, setIsProfileUpdating] = useState(false);
 
-  // カレンダー予定用ステート
   const [events, setEvents] = useState({});
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null);
@@ -174,7 +183,6 @@ export default function App() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, isChatLoading]);
 
-  // --- カレンダー日付の生成 ---
   const getCalendarDays = () => {
     const today = new Date();
     const year = today.getFullYear();
@@ -275,15 +283,14 @@ export default function App() {
   const deleteNote = async (id) => {
     if (!window.confirm("このノートを完全に削除しますか？")) { setMenuOpenId(null); return; }
     try {
-      if (!isCreateClientImported) throw new Error("コメントアウトが外されていません。");
-      if (!hasEnvVars) throw new Error("環境変数が読み込めていません。");
+      checkReadyState();
       const { error } = await supabase.from('notes').delete().eq('id', id);
       if (error) throw error;
       setNotes(prev => prev.filter(n => n.id !== id));
       setAnalyzeMessage({ type: 'success', text: 'ノートを削除しました。' });
       if (selectedNote?.id === id) setSelectedNote(null);
     } catch (err) {
-      setAnalyzeMessage({ type: 'error', text: `削除エラー: ${err.message}` });
+      setAnalyzeMessage({ type: 'error', text: `${err.message}` });
     } finally {
       setMenuOpenId(null);
       setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 3000);
@@ -295,8 +302,7 @@ export default function App() {
     if (!newNote.title || !newNote.subject || !session) return;
     setIsAdding(true); setAnalyzeMessage({ type: null, text: null });
     try {
-      if (!isCreateClientImported) throw new Error("コメントアウトが外されていません。");
-      if (!hasEnvVars) throw new Error("環境変数が読み込めていません。");
+      checkReadyState();
       const parsedTags = newNote.tags.split(',').map(t => t.trim()).filter(Boolean);
       const noteData = {
         title: newNote.title, subject: newNote.subject, preview: newNote.preview, tags: parsedTags,
@@ -307,7 +313,7 @@ export default function App() {
       await fetchNotes();
       setAnalyzeMessage({ type: 'success', text: '手動で追加しました！' });
       setIsAddModalOpen(false); setNewNote({ title: '', subject: '', preview: '', tags: '' });
-    } catch (err) { setAnalyzeMessage({ type: 'error', text: `追加エラー: ${err.message}` }); } 
+    } catch (err) { setAnalyzeMessage({ type: 'error', text: `${err.message}` }); } 
     finally { setIsAdding(false); setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 5000); }
   };
 
@@ -316,15 +322,14 @@ export default function App() {
     if (!file || !session) return;
     setIsAnalyzing(true); setAnalyzeMessage({ type: null, text: null });
     try {
-      if (!isCreateClientImported) throw new Error("コメントアウトが外されていません。");
-      if (!hasEnvVars) throw new Error("環境変数が読み込めていません。");
+      checkReadyState();
       const base64Data = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result.split(',')[1]);
         reader.onerror = (error) => reject(error);
         reader.readAsDataURL(file);
       });
-      if (!globalGeminiKey) throw new Error("VITE_GEMINI_API_KEY が設定されていません。");
+      if (!globalGeminiKey) throw new Error("VITE_GEMINI_API_KEY がVercelに設定されていません。");
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${globalGeminiKey}`;
       const response = await fetch(apiUrl, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -333,7 +338,7 @@ export default function App() {
           { inlineData: { mimeType: file.type, data: base64Data } }
         ]}]})
       });
-      if (!response.ok) throw new Error(`APIエラー: ${response.status}`);
+      if (!response.ok) throw new Error(`API通信エラー: ${response.status}`);
       const result = await response.json();
       let aiText = result.candidates[0].content.parts[0].text;
       const parsedData = JSON.parse(aiText.replace(/```json/gi, '').replace(/```/g, '').trim());
@@ -343,8 +348,8 @@ export default function App() {
       if (error) throw error;
       await fetchNotes();
       setAnalyzeMessage({ type: 'success', text: '画像解析に成功し保存されました！' });
-    } catch (err) { setAnalyzeMessage({ type: 'error', text: `エラー: ${err.message}` }); } 
-    finally { setIsAnalyzing(false); if (fileInputRef.current) fileInputRef.current.value = ''; setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 5000); }
+    } catch (err) { setAnalyzeMessage({ type: 'error', text: `${err.message}` }); } 
+    finally { setIsAnalyzing(false); if (fileInputRef.current) fileInputRef.current.value = ''; setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 7000); }
   };
 
   const handleSendMessage = async (e) => {
@@ -371,7 +376,6 @@ export default function App() {
     finally { setIsChatLoading(false); }
   };
 
-  // --- 新規追加：AIで専門分野との関連性を分析する機能 ---
   const handleAnalyzeRelevance = async (note) => {
     setRelevanceAnalysis({ loading: true, text: null, error: null });
     try {
@@ -403,7 +407,6 @@ export default function App() {
     }
   };
 
-  // --- ノートのカードUIコンポーネント ---
   const renderNoteCard = (note) => (
     <div 
       key={note.id} 
