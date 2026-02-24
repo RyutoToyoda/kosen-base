@@ -24,7 +24,6 @@ import {
 
 // =========================================================================
 // 【重要】本番環境（Vercel）で動かすための最終ステップ
-// 以下の1行の先頭にある「// 」を必ず消して保存してください！！
 // =========================================================================
 import { createClient } from '@supabase/supabase-js';
 
@@ -39,9 +38,11 @@ const getEnvVar = (key) => {
 const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
 const supabaseAnonKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
 
-let supabase;
+const isCreateClientImported = typeof createClient !== 'undefined';
+const hasEnvVars = !!(supabaseUrl && supabaseAnonKey);
+const isSupabaseReady = isCreateClientImported && hasEnvVars;
 
-const isSupabaseReady = supabaseUrl && supabaseAnonKey && typeof createClient !== 'undefined';
+let supabase;
 
 if (isSupabaseReady) {
   // @ts-ignore
@@ -220,12 +221,12 @@ export default function App() {
       return;
     }
     try {
-      if (isSupabaseReady) {
-        const { error } = await supabase.from('notes').delete().eq('id', id);
-        if (error) throw error;
-      } else {
-        throw new Error("Supabaseと接続されていません。");
-      }
+      if (!isCreateClientImported) throw new Error("import { createClient } のコメントアウトが外されていません。");
+      if (!hasEnvVars) throw new Error("Supabaseの環境変数(URL, ANON_KEY)が読み込めていません。Vercelで再デプロイしてください。");
+
+      const { error } = await supabase.from('notes').delete().eq('id', id);
+      if (error) throw error;
+      
       setNotes(prev => prev.filter(n => n.id !== id));
       setAnalyzeMessage({ type: 'success', text: 'ノートを削除しました。' });
     } catch (err) {
@@ -244,9 +245,8 @@ export default function App() {
     setAnalyzeMessage({ type: null, text: null });
 
     try {
-      if (!isSupabaseReady) {
-        throw new Error("import { createClient } のコメントアウトが外されていません！本物のDBに保存できません。");
-      }
+      if (!isCreateClientImported) throw new Error("import { createClient } のコメントアウトが外されていません。");
+      if (!hasEnvVars) throw new Error("Supabaseの環境変数が読み込めていません。Vercelの設定と再デプロイを確認してください。");
 
       const base64Data = await new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -310,9 +310,8 @@ export default function App() {
     setAnalyzeMessage({ type: null, text: null });
 
     try {
-      if (!isSupabaseReady) {
-        throw new Error("import { createClient } のコメントアウトが外されていません！本物のDBに保存できません。");
-      }
+      if (!isCreateClientImported) throw new Error("import { createClient } のコメントアウトが外されていません。");
+      if (!hasEnvVars) throw new Error("Supabaseの環境変数が読み込めていません。Vercelの設定と再デプロイを確認してください。");
 
       const parsedTags = newNote.tags.split(',').map(t => t.trim()).filter(Boolean);
       const noteData = {
