@@ -637,22 +637,32 @@ export default function App() {
               <p className="text-slate-400 max-w-lg mx-auto font-medium mb-12">
                 保存済みノートを科目別に一括管理します。
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-left">
-                {['情報工学', '数学', '物理', '英語'].map(sub => (
-                  <div key={sub} className="p-6 bg-[#0d1424] border border-slate-800 rounded-2xl hover:border-emerald-500/40 hover:bg-[#162136] transition-all flex items-center justify-between cursor-pointer group shadow-lg">
-                    <div className="flex items-center">
-                      <div className="w-12 h-12 bg-slate-800 rounded-xl flex items-center justify-center mr-4 group-hover:bg-emerald-600 transition-colors shadow-md border border-slate-700">
-                        <FileText className="w-6 h-6 text-white" />
+              
+              {notes.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-48 border-2 border-dashed border-slate-800 rounded-3xl text-slate-500">
+                  <p className="font-bold">まだノートがありません</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-left">
+                  {Array.from(new Set(notes.map(n => n.subject).filter(Boolean))).map(sub => {
+                    const count = notes.filter(n => n.subject === sub).length;
+                    return (
+                      <div key={sub} className="p-6 bg-[#0d1424] border border-slate-800 rounded-2xl hover:border-emerald-500/40 hover:bg-[#162136] transition-all flex items-center justify-between cursor-pointer group shadow-lg">
+                        <div className="flex items-center">
+                          <div className="w-12 h-12 bg-slate-800 rounded-xl flex items-center justify-center mr-4 group-hover:bg-emerald-600 transition-colors shadow-md border border-slate-700">
+                            <FileText className="w-6 h-6 text-white" />
+                          </div>
+                          <div>
+                            <p className="font-bold text-slate-100 text-lg">{sub}</p>
+                            <p className="text-[10px] text-slate-500 font-mono">{count} Items</p>
+                          </div>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-slate-600 group-hover:text-emerald-500" />
                       </div>
-                      <div>
-                        <p className="font-bold text-slate-100 text-lg">{sub}</p>
-                        <p className="text-[10px] text-slate-500 font-mono">-- Items</p>
-                      </div>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-slate-600 group-hover:text-emerald-500" />
-                  </div>
-                ))}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
