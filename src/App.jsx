@@ -30,16 +30,19 @@ import {
 // =========================================================================
 import { createClient } from '@supabase/supabase-js';
 
-const getEnvVar = (key) => {
-  try {
-    return import.meta.env[key] || '';
-  } catch (e) {
-    return '';
-  }
+// Viteのビルドで確実に環境変数が置換されるように、直接プロパティを指定します
+const getSupabaseUrl = () => {
+  try { return import.meta.env.VITE_SUPABASE_URL || ''; } catch (e) { return ''; }
+};
+const getSupabaseAnonKey = () => {
+  try { return import.meta.env.VITE_SUPABASE_ANON_KEY || ''; } catch (e) { return ''; }
+};
+const getGeminiKey = () => {
+  try { return import.meta.env.VITE_GEMINI_API_KEY || ''; } catch (e) { return ''; }
 };
 
-const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
-const supabaseAnonKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
+const supabaseUrl = getSupabaseUrl();
+const supabaseAnonKey = getSupabaseAnonKey();
 
 const isCreateClientImported = typeof createClient !== 'undefined';
 const hasEnvVars = !!(supabaseUrl && supabaseAnonKey);
@@ -317,7 +320,7 @@ export default function App() {
         reader.onerror = (error) => reject(error);
         reader.readAsDataURL(file);
       });
-      const geminiKey = getEnvVar('VITE_GEMINI_API_KEY');
+      const geminiKey = getGeminiKey();
       if (!geminiKey) throw new Error("VITE_GEMINI_API_KEY が設定されていません。");
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
       const response = await fetch(apiUrl, {
@@ -348,7 +351,7 @@ export default function App() {
     setChatMessages(prev => [...prev, { id: Date.now(), sender: 'user', text: userText }]);
     setChatInput(''); setIsChatLoading(true);
     try {
-      const geminiKey = getEnvVar('VITE_GEMINI_API_KEY');
+      const geminiKey = getGeminiKey();
       if (!geminiKey) {
         await new Promise(r => setTimeout(r, 1000));
         setChatMessages(prev => [...prev, { id: Date.now() + 1, sender: 'ai', text: 'APIキー未設定のデモモードです。' }]);
