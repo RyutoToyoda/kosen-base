@@ -96,16 +96,25 @@ export default function App() {
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   
-  // 新規追加：ノート詳細表示用のステート
+  // ノート詳細表示用
   const [selectedNote, setSelectedNote] = useState(null);
   
+  // 手動追加用
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newNote, setNewNote] = useState({ title: '', subject: '', preview: '', tags: '' });
   const [isAdding, setIsAdding] = useState(false);
   const [selectedSubject, setSelectedSubject] = useState(null);
+  
+  // プロフィール用
   const [profileForm, setProfileForm] = useState({ kosen: '', department: '', grade: '' });
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isProfileUpdating, setIsProfileUpdating] = useState(false);
+
+  // カレンダー予定用ステート
+  const [events, setEvents] = useState({});
+  const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [newEventTitle, setNewEventTitle] = useState('');
   
   const fileInputRef = useRef(null);
   const chatEndRef = useRef(null);
@@ -160,6 +169,31 @@ export default function App() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, isChatLoading]);
+
+  // --- カレンダー日付の生成 ---
+  const getCalendarDays = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const startingDayOfWeek = firstDay.getDay();
+    
+    const days = [];
+    for (let i = 0; i < startingDayOfWeek; i++) {
+      days.push(null);
+    }
+    for (let i = 1; i <= daysInMonth; i++) {
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
+      days.push({ dayNum: i, dateStr });
+    }
+    while (days.length % 7 !== 0) {
+      days.push(null);
+    }
+    return { days, year, month };
+  };
+  const calendarData = getCalendarDays();
 
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
@@ -243,7 +277,6 @@ export default function App() {
       if (error) throw error;
       setNotes(prev => prev.filter(n => n.id !== id));
       setAnalyzeMessage({ type: 'success', text: 'ノートを削除しました。' });
-      // 詳細画面を開いている最中に削除した場合、詳細画面を閉じる
       if (selectedNote?.id === id) setSelectedNote(null);
     } catch (err) {
       setAnalyzeMessage({ type: 'error', text: `削除エラー: ${err.message}` });
@@ -338,7 +371,7 @@ export default function App() {
   const renderNoteCard = (note) => (
     <div 
       key={note.id} 
-      onClick={() => setSelectedNote(note)} // クリックで詳細を開く
+      onClick={() => setSelectedNote(note)}
       className="bg-[#11192a] border border-slate-800 rounded-2xl p-6 hover:border-emerald-500/50 hover:bg-[#162136] transition-all duration-300 cursor-pointer group flex flex-col shadow-xl h-full min-h-[260px] relative"
     >
       <div className="flex justify-between items-start mb-4 shrink-0">
@@ -439,41 +472,84 @@ export default function App() {
       {/* 画面外クリック検知 */}
       {menuOpenId && <div className="fixed inset-0 z-10" onClick={() => setMenuOpenId(null)}></div>}
 
-      {/* --- 新規追加：ノート詳細表示モーダル --- */}
+      {/* --- 全画面対応：ノート詳細表示モーダル --- */}
       {selectedNote && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-300">
-          <div className="bg-[#0d1424] border border-slate-700 rounded-3xl p-8 w-full max-w-2xl max-h-[85vh] shadow-2xl relative flex flex-col animate-in zoom-in-95 duration-300">
-            <div className="flex justify-between items-start mb-6 shrink-0 border-b border-slate-800 pb-4">
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 sm:p-8 animate-in fade-in duration-300"
+          onClick={() => setSelectedNote(null)}
+        >
+          <div 
+            className="bg-[#0d1424] border border-slate-700 rounded-3xl p-6 sm:p-10 w-full h-full max-w-5xl shadow-2xl relative flex flex-col animate-in zoom-in-95 duration-300"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-start mb-6 shrink-0 border-b border-slate-800 pb-6">
               <div className="pr-4">
-                <span className="text-[10px] font-black px-2.5 py-1 rounded bg-[#1e293b] text-emerald-400 border border-emerald-500/20 uppercase tracking-tighter shadow-sm mb-3 inline-block">
+                <span className="text-xs font-black px-3 py-1.5 rounded bg-[#1e293b] text-emerald-400 border border-emerald-500/20 uppercase tracking-widest shadow-sm mb-4 inline-block">
                   {selectedNote.subject}
                 </span>
-                <h2 className="text-2xl font-black text-white leading-snug">{selectedNote.title}</h2>
+                <h2 className="text-2xl sm:text-4xl font-black text-white leading-tight">{selectedNote.title}</h2>
               </div>
-              <button onClick={() => setSelectedNote(null)} className="p-2 bg-slate-800/50 hover:bg-slate-700 rounded-full text-slate-400 hover:text-white transition-colors shrink-0">
-                 <X className="w-5 h-5" />
+              <button onClick={() => setSelectedNote(null)} className="p-3 bg-slate-800/50 hover:bg-slate-700 rounded-full text-slate-400 hover:text-white transition-colors shrink-0">
+                 <X className="w-6 h-6" />
               </button>
             </div>
             
             <div className="flex-1 overflow-y-auto pr-2 scrollbar-hide">
-              <p className="text-slate-300 leading-relaxed whitespace-pre-wrap font-medium">
+              <p className="text-slate-300 leading-relaxed whitespace-pre-wrap font-medium text-base sm:text-lg">
                 {selectedNote.preview}
               </p>
             </div>
             
-            <div className="mt-6 pt-4 border-t border-slate-800/50 flex items-center justify-between shrink-0">
-              <div className="flex items-center text-xs text-slate-500 font-mono font-bold tracking-tight">
+            <div className="mt-6 pt-6 border-t border-slate-800/50 flex flex-col sm:flex-row items-start sm:items-center justify-between shrink-0 gap-4">
+              <div className="flex items-center text-sm text-slate-500 font-mono font-bold tracking-tight">
                 <Clock className="w-4 h-4 mr-2 text-emerald-500/60" />
                 {selectedNote.date}
               </div>
               <div className="flex flex-wrap gap-2">
                 {selectedNote.tags?.map((tag, idx) => (
-                  <span key={idx} className="text-[10px] font-black px-2.5 py-1 rounded-full bg-[#1e293b] text-slate-300 border border-slate-700/50">
+                  <span key={idx} className="text-xs font-black px-3 py-1.5 rounded-full bg-[#1e293b] text-slate-300 border border-slate-700/50">
                     #{tag}
                   </span>
                 ))}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- カレンダー予定追加モーダル --- */}
+      {isEventModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-[#0d1424] border border-slate-700 rounded-3xl p-6 w-full max-w-sm shadow-2xl relative animate-in zoom-in-95 duration-200">
+            <h2 className="text-xl font-black text-white mb-6 flex items-center">
+              <CalendarIcon className="w-5 h-5 mr-2 text-emerald-500" />
+              予定を追加
+            </h2>
+            <p className="text-xs text-slate-400 mb-4 font-mono">{selectedDate}</p>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              if (!newEventTitle.trim()) return;
+              setEvents(prev => ({
+                ...prev,
+                [selectedDate]: [...(prev[selectedDate] || []), { id: Date.now(), title: newEventTitle.trim() }]
+              }));
+              setNewEventTitle('');
+              setIsEventModalOpen(false);
+            }} className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase">予定のタイトル</label>
+                <input 
+                  type="text" autoFocus required 
+                  value={newEventTitle} onChange={e => setNewEventTitle(e.target.value)} 
+                  className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-sm shadow-inner" 
+                  placeholder="レポート提出期限..." 
+                />
+              </div>
+              <div className="flex space-x-3 pt-4">
+                <button type="button" onClick={() => {setIsEventModalOpen(false); setNewEventTitle('');}} className="flex-1 bg-[#161f33] hover:bg-slate-700 text-white py-3 rounded-xl font-bold border border-slate-700 text-sm">キャンセル</button>
+                <button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold text-sm">追加する</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -766,12 +842,56 @@ export default function App() {
 
           {activeView === 'calendar' && (
             <div className="max-w-7xl mx-auto animate-in slide-in-from-top duration-500">
-              <h2 className="text-2xl font-black text-white flex items-center mb-8 tracking-tight"><CalendarIcon className="w-6 h-6 mr-3 text-emerald-500" />予定カレンダー</h2>
+              <div className="flex items-center justify-between mb-8">
+                <h2 className="text-2xl font-black text-white flex items-center tracking-tight">
+                  <CalendarIcon className="w-6 h-6 mr-3 text-emerald-500" />
+                  予定カレンダー <span className="ml-4 text-sm text-slate-500 font-medium">({calendarData.year}年 {calendarData.month + 1}月)</span>
+                </h2>
+              </div>
+              
               <div className="grid grid-cols-7 gap-px bg-slate-800 rounded-3xl overflow-hidden border border-slate-800 shadow-2xl">
-                {['日', '月', '火', '水', '木', '金', '土'].map(day => (<div key={day} className="bg-[#11192a] py-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest">{day}</div>))}
-                {Array.from({ length: 35 }).map((_, i) => (
-                  <div key={i} className="bg-[#0d1424] min-h-[120px] p-3 hover:bg-slate-800/40 transition-all duration-300 group relative">
-                    <span className={`text-[11px] font-mono text-slate-700 group-hover:text-slate-400 transition-colors`}>{(i % 31) + 1}</span>
+                {['日', '月', '火', '水', '木', '金', '土'].map(day => (
+                  <div key={day} className="bg-[#11192a] py-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest">{day}</div>
+                ))}
+                
+                {calendarData.days.map((dayObj, i) => (
+                  <div 
+                    key={i} 
+                    onClick={() => {
+                      if (dayObj) {
+                        setSelectedDate(dayObj.dateStr);
+                        setIsEventModalOpen(true);
+                      }
+                    }}
+                    className={`bg-[#0d1424] min-h-[120px] p-3 transition-all duration-300 relative ${dayObj ? 'hover:bg-slate-800/40 cursor-pointer group' : 'opacity-50'}`}
+                  >
+                    {dayObj && (
+                      <>
+                        <span className={`text-[11px] font-mono transition-colors ${dayObj.dateStr === new Date().toISOString().split('T')[0] ? 'text-emerald-400 font-black text-sm' : 'text-slate-500 group-hover:text-slate-300'}`}>
+                          {dayObj.dayNum}
+                        </span>
+                        
+                        <div className="mt-2 space-y-1">
+                          {events[dayObj.dateStr]?.map(ev => (
+                            <div key={ev.id} className="p-1.5 bg-emerald-500/15 border-l-2 border-emerald-500 rounded text-[10px] text-emerald-100 font-bold flex justify-between items-center group/event">
+                              <span className="truncate">{ev.title}</span>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEvents(prev => ({
+                                    ...prev,
+                                    [dayObj.dateStr]: prev[dayObj.dateStr].filter(item => item.id !== ev.id)
+                                  }));
+                                }}
+                                className="text-emerald-400 hover:text-red-400 opacity-0 group-hover/event:opacity-100 transition-opacity"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
