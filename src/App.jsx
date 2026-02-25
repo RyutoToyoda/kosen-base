@@ -25,27 +25,24 @@ import {
   X,
   Compass,
   Bookmark,
-  Filter
+  Filter,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 // =========================================================================
 // 【重要】本番環境（Vercel）で動かすための最終ステップ
 // 以下の1行の先頭の「// 」を必ず消して保存してください！
-// （※プレビュー画面で真っ白にならないよう、今はコメントアウトしています）
 // =========================================================================
 import { createClient } from '@supabase/supabase-js';
 
-// 一番安定して動作していた読み込み方に修正（＋白画面クラッシュの完全防止策）
+// 環境変数の安全な読み込み
 const getEnvVar = (key) => {
   try {
-    // プレビュー環境など import.meta 自体が存在しない場合のエラーを回避
     if (typeof import.meta === 'undefined' || !import.meta.env) return '';
-    
-    // Viteのビルド時に確実に置換させるための直接指定
     if (key === 'VITE_SUPABASE_URL') return import.meta.env.VITE_SUPABASE_URL || '';
     if (key === 'VITE_SUPABASE_ANON_KEY') return import.meta.env.VITE_SUPABASE_ANON_KEY || '';
     if (key === 'VITE_GEMINI_API_KEY') return import.meta.env.VITE_GEMINI_API_KEY || '';
-    
     return import.meta.env[key] || '';
   } catch (e) {
     return '';
@@ -89,21 +86,14 @@ const INITIAL_CHAT = [
   { id: 1, sender: 'ai', text: 'こんにちは！KOSEN-base AIアシスタントです。学習の質問やノート内容の深掘りなど、何でも聞いてください。' }
 ];
 
-// 環境変数やインポートの状況をチェックする共通関数
 const checkReadyState = () => {
-  if (!isCreateClientImported) {
-    throw new Error("28行目のコメントアウト (import { createClient }...) が外されていません。");
-  }
+  if (!isCreateClientImported) throw new Error("28行目のコメントアウト (import { createClient }...) が外されていません。");
   const missing = [];
   if (!supabaseUrl) missing.push("URL");
   if (!supabaseAnonKey) missing.push("ANON_KEY");
-  
-  if (missing.length > 0) {
-    throw new Error(`Supabaseの ${missing.join(' と ')} がVercelから読み込めていません。Vercel上で「Redeploy」を実行してください。`);
-  }
+  if (missing.length > 0) throw new Error(`Supabaseの ${missing.join(' と ')} が読み込めていません。VercelでRedeployしてください。`);
 };
 
-// タグからアイテムの種類を安全に判定
 const getItemType = (tags) => {
   if (!Array.isArray(tags)) return 'note';
   if (tags.includes('type:exam')) return 'exam';
@@ -111,8 +101,8 @@ const getItemType = (tags) => {
   return 'note';
 };
 
-// タグから過去問のメタデータを安全に抽出
-const getExamMeta = (tags) => {
+// ノート、資料、過去問すべてのメタデータ（学年・学期）を抽出
+const getItemMeta = (tags) => {
   const meta = { grade: '', term: '', type: '' };
   if (!Array.isArray(tags)) return meta;
   tags.forEach(t => {
@@ -129,6 +119,7 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false); // パスワード表示トグル用
   const [authError, setAuthError] = useState('');
   const [isAuthSubmitLoading, setIsAuthSubmitLoading] = useState(false);
   const [isLoginMode, setIsLoginMode] = useState(true);
@@ -150,11 +141,12 @@ export default function App() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newItemType, setNewItemType] = useState('note');
   const [newNote, setNewNote] = useState({ title: '', subject: '', preview: '', tags: '' });
-  const [examMeta, setExamMeta] = useState({ grade: '1年', term: '前期', type: '中間' });
+  const [itemMeta, setItemMeta] = useState({ grade: '', term: '', type: '中間' }); // メタデータを共通化
   const [isAdding, setIsAdding] = useState(false);
   const [selectedSubject, setSelectedSubject] = useState(null);
 
-  const [examFilter, setExamFilter] = useState({ grade: '', term: '', type: '' });
+  // 全ビュー共通のフィルター
+  const [commonFilter, setCommonFilter] = useState({ grade: '', term: '', type: '' });
   
   const [profileForm, setProfileForm] = useState({ kosen: '', department: '', grade: '' });
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -168,17 +160,19 @@ export default function App() {
   const fileInputRef = useRef(null);
   const chatEndRef = useRef(null);
 
+  // 予測変換用のユニークなリストを作成
+  const uniqueTitles = Array.from(new Set(notes.map(n => n.title).filter(Boolean)));
+  const uniqueSubjects = Array.from(new Set(notes.map(n => n.subject).filter(Boolean)));
+
   useEffect(() => {
     if (isSupabaseReady) {
       supabase.auth.getSession().then(({ data: { session } }) => {
         handleSessionUpdate(session);
         setIsAuthLoading(false);
       });
-
       const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
         handleSessionUpdate(session);
       });
-
       return () => subscription.unsubscribe();
     } else {
       setIsAuthLoading(false);
@@ -227,18 +221,10 @@ export default function App() {
     const lastDay = new Date(year, month + 1, 0);
     const daysInMonth = lastDay.getDate();
     const startingDayOfWeek = firstDay.getDay();
-    
     const days = [];
-    for (let i = 0; i < startingDayOfWeek; i++) {
-      days.push(null);
-    }
-    for (let i = 1; i <= daysInMonth; i++) {
-      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-      days.push({ dayNum: i, dateStr });
-    }
-    while (days.length % 7 !== 0) {
-      days.push(null);
-    }
+    for (let i = 0; i < startingDayOfWeek; i++) days.push(null);
+    for (let i = 1; i <= daysInMonth; i++) days.push({ dayNum: i, dateStr: `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}` });
+    while (days.length % 7 !== 0) days.push(null);
     return { days, year, month };
   };
   const calendarData = getCalendarDays();
@@ -306,7 +292,6 @@ export default function App() {
     else setSession(null);
   };
 
-  // 白画面クラッシュを防ぐため、Array.isArrayでチェックを強化
   const filteredNotes = Array.isArray(notes) ? notes.filter(note => {
     const q = searchQuery.toLowerCase();
     return (
@@ -316,6 +301,18 @@ export default function App() {
       (Array.isArray(note.tags) && note.tags.some(t => typeof t === 'string' && t.toLowerCase().includes(q)))
     );
   }) : [];
+
+  // 各画面用のフィルター適用関数
+  const getFilteredItemsByType = (type) => {
+    return filteredNotes.filter(n => {
+      if (getItemType(n.tags) !== type) return false;
+      const meta = getItemMeta(n.tags);
+      if (commonFilter.grade && meta.grade !== commonFilter.grade) return false;
+      if (commonFilter.term && meta.term !== commonFilter.term) return false;
+      if (type === 'exam' && commonFilter.type && meta.type !== commonFilter.type) return false;
+      return true;
+    });
+  };
 
   const deleteNote = async (id) => {
     if (!window.confirm("このノートを完全に削除しますか？")) { setMenuOpenId(null); return; }
@@ -343,9 +340,10 @@ export default function App() {
       const parsedTags = newNote.tags.split(',').map(t => t.trim()).filter(Boolean);
       
       parsedTags.push(`type:${newItemType}`);
-      if (newItemType === 'exam') {
-        parsedTags.push(`grade:${examMeta.grade}`, `term:${examMeta.term}`, `exam:${examMeta.type}`);
-      }
+      // ノートや資料でも学年・学期のメタデータを保存できるように変更
+      if (itemMeta.grade) parsedTags.push(`grade:${itemMeta.grade}`);
+      if (itemMeta.term) parsedTags.push(`term:${itemMeta.term}`);
+      if (newItemType === 'exam' && itemMeta.type) parsedTags.push(`exam:${itemMeta.type}`);
 
       const noteData = {
         title: newNote.title, subject: newNote.subject, preview: newNote.preview, tags: parsedTags,
@@ -355,8 +353,10 @@ export default function App() {
       if (error) throw error;
       
       await fetchNotes();
-      setAnalyzeMessage({ type: 'success', text: '手動で追加しました！' });
-      setIsAddModalOpen(false); setNewNote({ title: '', subject: '', preview: '', tags: '' });
+      setAnalyzeMessage({ type: 'success', text: 'アイテムを追加しました！' });
+      setIsAddModalOpen(false); 
+      setNewNote({ title: '', subject: '', preview: '', tags: '' });
+      setItemMeta({ grade: '', term: '', type: '中間' });
     } catch (err) { setAnalyzeMessage({ type: 'error', text: `${err.message}` }); } 
     finally { setIsAdding(false); setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 5000); }
   };
@@ -388,7 +388,7 @@ export default function App() {
       const parsedData = JSON.parse(aiText.replace(/```json/gi, '').replace(/```/g, '').trim());
       
       const finalTags = Array.isArray(parsedData.tags) ? parsedData.tags : [];
-      finalTags.push('type:note');
+      finalTags.push('type:note'); // デフォルトはノートとして追加
 
       const { error } = await supabase.from('notes').insert([{
         ...parsedData, tags: finalTags, date: new Date().toISOString().split('T')[0], user_id: session.user.id
@@ -453,52 +453,79 @@ export default function App() {
     }
   };
 
-  const renderNoteCard = (note) => (
-    <div 
-      key={note.id} 
-      onClick={() => setSelectedNote(note)}
-      className="bg-[#11192a] border border-slate-800 rounded-2xl p-6 hover:border-emerald-500/50 hover:bg-[#162136] transition-all duration-300 cursor-pointer group flex flex-col shadow-xl h-full min-h-[260px] relative text-left"
-    >
-      <div className="flex justify-between items-start mb-4 shrink-0">
-        <div className="flex flex-wrap gap-2">
-          <span className={`text-[10px] font-black px-2.5 py-1 rounded border uppercase tracking-tighter shadow-sm ${getItemType(note.tags) === 'exam' ? 'bg-red-950/30 text-red-400 border-red-500/20' : getItemType(note.tags) === 'material' ? 'bg-blue-950/30 text-blue-400 border-blue-500/20' : 'bg-[#1e293b] text-emerald-400 border-emerald-500/20'}`}>
-            {note.subject}
-          </span>
-          {getItemType(note.tags) === 'exam' && getExamMeta(note.tags) && (
-            <span className="text-[10px] font-black px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700 uppercase tracking-tighter">
-              {getExamMeta(note.tags).grade} {getExamMeta(note.tags).term}
-            </span>
-          )}
-        </div>
-        <div className="relative z-20">
-          <button onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === note.id ? null : note.id); }} className="p-1.5 hover:bg-slate-700 rounded-lg transition-colors text-slate-600 hover:text-slate-200">
-            <MoreVertical className="w-4 h-4" />
-          </button>
-          {menuOpenId === note.id && (
-            <div className="absolute right-0 top-8 w-32 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-              <button onClick={(e) => { e.stopPropagation(); deleteNote(note.id); }} className="w-full text-left px-4 py-3 text-xs font-bold text-red-400 hover:bg-red-500/10 transition-colors flex items-center">
-                <Trash2 className="w-3.5 h-3.5 mr-2" /> 削除する
-              </button>
-            </div>
-          )}
-        </div>
+  // 共通の絞り込みUIコンポーネント
+  const renderFilterUI = (showExamType = false) => (
+    <div className="flex bg-[#161f33] border border-slate-700 rounded-xl p-1 shadow-inner w-full sm:w-auto">
+      <div className="flex items-center px-3 border-r border-slate-700">
+        <Filter className="w-4 h-4 text-slate-400" />
       </div>
-      <div className="flex-1 mb-4 flex flex-col justify-start overflow-hidden">
-        <h3 className="text-lg font-bold text-white mb-2 group-hover:text-emerald-400 transition-colors leading-snug line-clamp-2">{note.title}</h3>
-        <p className="text-sm text-slate-400 leading-relaxed font-medium line-clamp-3">{note.preview}</p>
-      </div>
-      <div className="mt-auto pt-4 border-t border-slate-800/50 flex flex-col gap-3 shrink-0">
-        <div className="flex items-center text-[10px] text-slate-500 font-mono font-bold tracking-tight">
-          <Clock className="w-3 h-3 mr-1.5 text-emerald-500/60" />{note.date}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {Array.isArray(note.tags) && note.tags.filter(t => !t.includes(':')).map((tag, idx) => (
-            <span key={idx} className="text-[9px] font-black px-2 py-0.5 rounded-full bg-[#1e293b] text-slate-300 border border-slate-700/50 transition-colors hover:border-emerald-500/40">#{tag}</span>
-          ))}
-        </div>
-      </div>
+      <select value={commonFilter.grade} onChange={e => setCommonFilter({...commonFilter, grade: e.target.value})} className="bg-transparent text-slate-300 text-xs font-bold px-3 py-2 outline-none appearance-none cursor-pointer hover:text-white">
+        <option value="">全学年</option>
+        <option value="1年">1年</option><option value="2年">2年</option><option value="3年">3年</option><option value="4年">4年</option><option value="5年">5年</option><option value="専攻科">専攻科</option>
+      </select>
+      <select value={commonFilter.term} onChange={e => setCommonFilter({...commonFilter, term: e.target.value})} className="bg-transparent text-slate-300 text-xs font-bold px-3 py-2 outline-none appearance-none cursor-pointer border-l border-slate-700 hover:text-white">
+        <option value="">全学期</option>
+        <option value="前期">前期</option><option value="後期">後期</option>
+      </select>
+      {showExamType && (
+        <select value={commonFilter.type} onChange={e => setCommonFilter({...commonFilter, type: e.target.value})} className="bg-transparent text-slate-300 text-xs font-bold px-3 py-2 outline-none appearance-none cursor-pointer border-l border-slate-700 hover:text-white">
+          <option value="">全試験</option>
+          <option value="中間">中間</option><option value="期末">期末</option><option value="小テスト">小テスト</option>
+        </select>
+      )}
     </div>
   );
+
+  const renderNoteCard = (note) => {
+    const type = getItemType(note.tags);
+    const meta = getItemMeta(note.tags);
+    return (
+      <div 
+        key={note.id} 
+        onClick={() => setSelectedNote(note)}
+        className="bg-[#11192a] border border-slate-800 rounded-2xl p-6 hover:border-emerald-500/50 hover:bg-[#162136] transition-all duration-300 cursor-pointer group flex flex-col shadow-xl h-full min-h-[260px] relative text-left"
+      >
+        <div className="flex justify-between items-start mb-4 shrink-0">
+          <div className="flex flex-wrap gap-2">
+            <span className={`text-[10px] font-black px-2.5 py-1 rounded border uppercase tracking-tighter shadow-sm ${type === 'exam' ? 'bg-red-950/30 text-red-400 border-red-500/20' : type === 'material' ? 'bg-blue-950/30 text-blue-400 border-blue-500/20' : 'bg-[#1e293b] text-emerald-400 border-emerald-500/20'}`}>
+              {note.subject}
+            </span>
+            {meta && (meta.grade || meta.term) && (
+              <span className="text-[10px] font-black px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700 uppercase tracking-tighter">
+                {meta.grade} {meta.term} {type === 'exam' ? meta.type : ''}
+              </span>
+            )}
+          </div>
+          <div className="relative z-20">
+            <button onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === note.id ? null : note.id); }} className="p-1.5 hover:bg-slate-700 rounded-lg transition-colors text-slate-600 hover:text-slate-200">
+              <MoreVertical className="w-4 h-4" />
+            </button>
+            {menuOpenId === note.id && (
+              <div className="absolute right-0 top-8 w-32 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+                <button onClick={(e) => { e.stopPropagation(); deleteNote(note.id); }} className="w-full text-left px-4 py-3 text-xs font-bold text-red-400 hover:bg-red-500/10 transition-colors flex items-center">
+                  <Trash2 className="w-3.5 h-3.5 mr-2" /> 削除する
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex-1 mb-4 flex flex-col justify-start overflow-hidden">
+          <h3 className="text-lg font-bold text-white mb-2 group-hover:text-emerald-400 transition-colors leading-snug line-clamp-2">{note.title}</h3>
+          <p className="text-sm text-slate-400 leading-relaxed font-medium line-clamp-3">{note.preview}</p>
+        </div>
+        <div className="mt-auto pt-4 border-t border-slate-800/50 flex flex-col gap-3 shrink-0">
+          <div className="flex items-center text-[10px] text-slate-500 font-mono font-bold tracking-tight">
+            <Clock className="w-3 h-3 mr-1.5 text-emerald-500/60" />{note.date}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {Array.isArray(note.tags) && note.tags.filter(t => !t.includes(':')).map((tag, idx) => (
+              <span key={idx} className="text-[9px] font-black px-2 py-0.5 rounded-full bg-[#1e293b] text-slate-300 border border-slate-700/50 transition-colors hover:border-emerald-500/40">#{tag}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const menuItems = [
     { id: 'dashboard', label: 'ダッシュボード', icon: LayoutDashboard },
@@ -536,7 +563,12 @@ export default function App() {
             </div>
             <div>
               <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest">Password</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3.5 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm shadow-inner" placeholder="••••••••" />
+              <div className="relative">
+                <input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3.5 pr-12 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm shadow-inner" placeholder="••••••••" />
+                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors">
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
             {authError && (
               <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 flex items-start space-x-2">
@@ -565,6 +597,14 @@ export default function App() {
       {/* 画面外クリック検知 */}
       {menuOpenId && <div className="fixed inset-0 z-10" onClick={() => setMenuOpenId(null)}></div>}
 
+      {/* 予測変換用のデータリスト */}
+      <datalist id="title-suggestions">
+        {uniqueTitles.map((t, i) => <option key={i} value={t} />)}
+      </datalist>
+      <datalist id="subject-suggestions">
+        {uniqueSubjects.map((s, i) => <option key={i} value={s} />)}
+      </datalist>
+
       {/* --- 全画面対応：ノート詳細表示モーダル --- */}
       {selectedNote && (
         <div 
@@ -581,9 +621,9 @@ export default function App() {
                   <span className="text-xs font-black px-3 py-1.5 rounded bg-[#1e293b] text-emerald-400 border border-emerald-500/20 uppercase tracking-widest shadow-sm inline-block">
                     {selectedNote.subject}
                   </span>
-                  {getItemType(selectedNote.tags) === 'exam' && (
-                    <span className="text-xs font-black px-3 py-1.5 rounded bg-red-950/30 text-red-400 border border-red-500/20 uppercase tracking-widest shadow-sm inline-block">
-                      {getExamMeta(selectedNote.tags).grade} {getExamMeta(selectedNote.tags).term} {getExamMeta(selectedNote.tags).type}
+                  {getItemMeta(selectedNote.tags) && (getItemMeta(selectedNote.tags).grade || getItemMeta(selectedNote.tags).term) && (
+                    <span className="text-xs font-black px-3 py-1.5 rounded bg-slate-800 text-slate-300 border border-slate-700 uppercase tracking-widest shadow-sm inline-block">
+                      {getItemMeta(selectedNote.tags).grade} {getItemMeta(selectedNote.tags).term} {getItemType(selectedNote.tags) === 'exam' ? getItemMeta(selectedNote.tags).type : ''}
                     </span>
                   )}
                 </div>
@@ -719,13 +759,8 @@ export default function App() {
                 <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest">学年</label>
                 <select required value={profileForm.grade} onChange={e => setProfileForm({...profileForm, grade: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-sm appearance-none">
                   <option value="" disabled>選択してください</option>
-                  <option value="1年">1年</option>
-                  <option value="2年">2年</option>
-                  <option value="3年">3年</option>
-                  <option value="4年">4年</option>
-                  <option value="5年">5年</option>
-                  <option value="専攻科1年">専攻科1年</option>
-                  <option value="専攻科2年">専攻科2年</option>
+                  <option value="1年">1年</option><option value="2年">2年</option><option value="3年">3年</option>
+                  <option value="4年">4年</option><option value="5年">5年</option><option value="専攻科1年">専攻科1年</option><option value="専攻科2年">専攻科2年</option>
                 </select>
               </div>
               <button type="submit" disabled={isProfileUpdating} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 rounded-xl font-bold transition-all shadow-lg active:scale-95 flex items-center justify-center mt-6 disabled:opacity-50">
@@ -749,34 +784,42 @@ export default function App() {
             </div>
 
             <form onSubmit={handleManualAdd} className="space-y-4">
-              <div><label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase">タイトル (必須)</label><input type="text" required value={newNote.title} onChange={e => setNewNote({...newNote, title: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-sm" placeholder="線形代数 第1回..." /></div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase">タイトル (必須)</label>
+                <input list="title-suggestions" type="text" required value={newNote.title} onChange={e => setNewNote({...newNote, title: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-sm" placeholder="線形代数 第1回..." />
+              </div>
               
-              {newItemType === 'exam' && (
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase">学年</label>
-                    <select value={examMeta.grade} onChange={e => setExamMeta({...examMeta, grade: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-3 py-3 focus:border-emerald-500 text-sm appearance-none">
-                      <option value="1年">1年</option><option value="2年">2年</option><option value="3年">3年</option><option value="4年">4年</option><option value="5年">5年</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase">学期</label>
-                    <select value={examMeta.term} onChange={e => setExamMeta({...examMeta, term: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-3 py-3 focus:border-emerald-500 text-sm appearance-none">
-                      <option value="前期">前期</option><option value="後期">後期</option>
-                    </select>
-                  </div>
-                  <div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase">学年</label>
+                  <select value={itemMeta.grade} onChange={e => setItemMeta({...itemMeta, grade: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-3 py-3 focus:border-emerald-500 text-sm appearance-none">
+                    <option value="">未設定</option><option value="1年">1年</option><option value="2年">2年</option><option value="3年">3年</option><option value="4年">4年</option><option value="5年">5年</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase">学期</label>
+                  <select value={itemMeta.term} onChange={e => setItemMeta({...itemMeta, term: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-3 py-3 focus:border-emerald-500 text-sm appearance-none">
+                    <option value="">未設定</option><option value="前期">前期</option><option value="後期">後期</option>
+                  </select>
+                </div>
+                {newItemType === 'exam' && (
+                  <div className="col-span-2">
                     <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase">試験</label>
-                    <select value={examMeta.type} onChange={e => setExamMeta({...examMeta, type: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-3 py-3 focus:border-emerald-500 text-sm appearance-none">
+                    <select value={itemMeta.type} onChange={e => setItemMeta({...itemMeta, type: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-3 py-3 focus:border-emerald-500 text-sm appearance-none">
                       <option value="中間">中間</option><option value="期末">期末</option><option value="小テスト">小テスト</option>
                     </select>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
-              <div><label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase">科目 (必須)</label><input type="text" required value={newNote.subject} onChange={e => setNewNote({...newNote, subject: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-sm" placeholder="数学" /></div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase">科目 (必須)</label>
+                <input list="subject-suggestions" type="text" required value={newNote.subject} onChange={e => setNewNote({...newNote, subject: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-sm" placeholder="数学" />
+              </div>
+              
               <div><label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase">要約 / 内容</label><textarea value={newNote.preview} onChange={e => setNewNote({...newNote, preview: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-sm h-24 resize-none" placeholder="主な内容..." /></div>
-              <div><label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase">タグ (カンマ区切り)</label><input type="text" value={newNote.tags} onChange={e => setNewNote({...newNote, tags: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-sm" placeholder="前期, 課題..." /></div>
+              <div><label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase">タグ (カンマ区切り)</label><input type="text" value={newNote.tags} onChange={e => setNewNote({...newNote, tags: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-sm" placeholder="重要, 微分..." /></div>
+              
               <div className="flex space-x-3 pt-4">
                 <button type="button" onClick={() => setIsAddModalOpen(false)} className="flex-1 bg-[#161f33] hover:bg-slate-700 text-white py-3 rounded-xl font-bold border border-slate-700 text-sm">キャンセル</button>
                 <button type="submit" disabled={isAdding} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold flex items-center justify-center text-sm disabled:opacity-50">{isAdding ? <Loader2 className="w-5 h-5 animate-spin" /> : '追加する'}</button>
@@ -796,7 +839,7 @@ export default function App() {
           {menuItems.map((item) => (
             <button
               key={item.id}
-              onClick={() => { setActiveView(item.id); setSelectedSubject(null); }}
+              onClick={() => { setActiveView(item.id); setSelectedSubject(null); setCommonFilter({grade: '', term: '', type: ''}); }}
               className={`w-full flex items-center px-4 py-3 rounded-xl transition-all duration-200 ${
                 activeView === item.id 
                   ? 'bg-emerald-600/15 text-emerald-400 border border-emerald-500/20 shadow-lg shadow-emerald-500/5' 
@@ -854,7 +897,9 @@ export default function App() {
               {isAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin text-emerald-500" /> : <ImagePlus className="w-4 h-4 mr-2 text-emerald-500" />} {isAnalyzing ? '解析中...' : '画像から追加'}
             </button>
             <button onClick={() => {
+              // 現在の画面に合わせてデフォルトの追加タイプを設定
               setNewItemType(activeView === 'exams' ? 'exam' : activeView === 'materials' ? 'material' : 'note');
+              setItemMeta({ grade: '', term: '', type: '中間' });
               setIsAddModalOpen(true);
             }} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold transition-all shadow-lg shadow-emerald-900/20 text-sm flex items-center active:scale-95">
               <Plus className="w-4 h-4 mr-1" /> 新規作成
@@ -878,6 +923,24 @@ export default function App() {
         <div className="flex-1 overflow-y-auto p-6 scrollbar-hide text-left">
           {activeView === 'dashboard' && (
             <div className="max-w-7xl mx-auto animate-in fade-in duration-500">
+              {/* --- 新規追加：ウェルカムバナー --- */}
+              {!searchQuery && (
+                <div className="mb-8 bg-gradient-to-br from-emerald-900/30 to-[#0d1424] border border-emerald-500/20 rounded-3xl p-8 sm:p-10 relative overflow-hidden shadow-xl">
+                  <div className="absolute top-[-20%] right-[-5%] p-8 opacity-10 rotate-12 pointer-events-none">
+                    <GraduationCap className="w-48 h-48 text-emerald-500" />
+                  </div>
+                  <div className="relative z-10">
+                    <div className="inline-flex items-center px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-black tracking-widest uppercase mb-4">
+                      Overview
+                    </div>
+                    <h2 className="text-2xl sm:text-3xl font-black text-white mb-3 tracking-tight">KOSEN-base へようこそ！</h2>
+                    <p className="text-sm text-slate-300 leading-relaxed max-w-2xl font-medium">
+                      ここは高専生のための次世代学習プラットフォームです。ノート、過去問、学習資料を一元管理し、画像をアップロードするだけでAIが内容を自動で要約・分類してくれます。右下のAIチャットに学習の相談をすることも可能です。
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center justify-between mb-8">
                 <h2 className="text-2xl font-black text-white flex items-center tracking-tight">
                   <LayoutDashboard className="w-6 h-6 mr-3 text-emerald-500" />
@@ -899,22 +962,25 @@ export default function App() {
 
           {activeView === 'notes' && (
             <div className="max-w-7xl mx-auto animate-in slide-in-from-bottom duration-500 text-left">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
+                <h2 className="text-2xl font-black text-white flex items-center tracking-tight">
+                  <BookOpen className="w-6 h-6 mr-3 text-emerald-500" />
+                  マイノート
+                </h2>
+                {/* 絞り込みUIをノート画面にも追加 */}
+                {renderFilterUI(false)}
+              </div>
+
               {!selectedSubject ? (
-                <div className="text-center py-12">
-                  <div className="w-24 h-24 bg-emerald-500/10 rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-inner border border-emerald-500/20">
-                    <BookOpen className="w-12 h-12 text-emerald-500" />
-                  </div>
-                  <h2 className="text-3xl font-black text-white mb-3 tracking-tight">マイノート</h2>
-                  <p className="text-slate-400 max-w-lg mx-auto font-medium mb-12">保存済みノートを科目別に一括管理します。</p>
-                  
-                  {filteredNotes.filter(n => getItemType(n.tags) === 'note').length === 0 ? (
+                <div className="text-center py-8">
+                  {getFilteredItemsByType('note').length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-48 border-2 border-dashed border-slate-800 rounded-3xl text-slate-500">
-                      <p className="font-bold">まだノートがありません</p>
+                      <p className="font-bold">条件に合うノートがありません</p>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-left max-w-5xl mx-auto">
-                      {Array.from(new Set(filteredNotes.filter(n => getItemType(n.tags) === 'note').map(n => n.subject).filter(Boolean))).map(sub => {
-                        const count = filteredNotes.filter(n => getItemType(n.tags) === 'note' && n.subject === sub).length;
+                      {Array.from(new Set(getFilteredItemsByType('note').map(n => n.subject).filter(Boolean))).map(sub => {
+                        const count = getFilteredItemsByType('note').filter(n => n.subject === sub).length;
                         return (
                           <div key={sub} onClick={() => setSelectedSubject(sub)} className="p-6 bg-[#0d1424] border border-slate-800 rounded-2xl hover:border-emerald-500/40 hover:bg-[#162136] transition-all flex items-center justify-between cursor-pointer group shadow-lg">
                             <div className="flex items-center">
@@ -940,7 +1006,7 @@ export default function App() {
                     科目一覧へ戻る
                   </button>
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 border-b border-slate-800 pb-4 gap-4">
-                    <h2 className="text-2xl font-black text-white flex items-center">
+                    <h2 className="text-xl font-black text-white flex items-center">
                       <div className="w-8 h-8 bg-emerald-500/20 rounded-lg flex items-center justify-center mr-3 border border-emerald-500/30">
                         <BookOpen className="w-4 h-4 text-emerald-500" />
                       </div>
@@ -949,13 +1015,14 @@ export default function App() {
                     <button onClick={() => { 
                       setNewItemType('note'); 
                       setNewNote({...newNote, subject: selectedSubject}); 
+                      setItemMeta({ grade: '', term: '', type: '中間' });
                       setIsAddModalOpen(true); 
                     }} className="bg-[#1e293b] hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 px-4 py-2 rounded-lg font-bold text-sm flex items-center transition-all">
                       <Plus className="w-4 h-4 mr-2" /> この科目にノートを追加
                     </button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredNotes.filter(n => getItemType(n.tags) === 'note' && n.subject === selectedSubject).map(renderNoteCard)}
+                    {getFilteredItemsByType('note').filter(n => n.subject === selectedSubject).map(renderNoteCard)}
                   </div>
                 </div>
               )}
@@ -970,24 +1037,8 @@ export default function App() {
                   過去問アーカイブ
                 </h2>
                 <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
-                  <div className="flex bg-[#161f33] border border-slate-700 rounded-xl p-1 shadow-inner w-full sm:w-auto">
-                    <div className="flex items-center px-3 border-r border-slate-700">
-                      <Filter className="w-4 h-4 text-slate-400" />
-                    </div>
-                    <select value={examFilter.grade} onChange={e => setExamFilter({...examFilter, grade: e.target.value})} className="bg-transparent text-slate-300 text-xs font-bold px-3 py-2 outline-none appearance-none cursor-pointer hover:text-white">
-                      <option value="">全学年</option>
-                      <option value="1年">1年</option><option value="2年">2年</option><option value="3年">3年</option><option value="4年">4年</option><option value="5年">5年</option>
-                    </select>
-                    <select value={examFilter.term} onChange={e => setExamFilter({...examFilter, term: e.target.value})} className="bg-transparent text-slate-300 text-xs font-bold px-3 py-2 outline-none appearance-none cursor-pointer border-l border-slate-700 hover:text-white">
-                      <option value="">全学期</option>
-                      <option value="前期">前期</option><option value="後期">後期</option>
-                    </select>
-                    <select value={examFilter.type} onChange={e => setExamFilter({...examFilter, type: e.target.value})} className="bg-transparent text-slate-300 text-xs font-bold px-3 py-2 outline-none appearance-none cursor-pointer border-l border-slate-700 hover:text-white">
-                      <option value="">全試験</option>
-                      <option value="中間">中間</option><option value="期末">期末</option><option value="小テスト">小テスト</option>
-                    </select>
-                  </div>
-                  <button onClick={() => { setNewItemType('exam'); setIsAddModalOpen(true); }} className="bg-red-950/40 hover:bg-red-900/50 text-red-400 border border-red-500/30 px-4 py-2 rounded-xl font-bold text-sm flex items-center transition-all w-full sm:w-auto justify-center whitespace-nowrap">
+                  {renderFilterUI(true)}
+                  <button onClick={() => { setNewItemType('exam'); setItemMeta({ grade: '', term: '', type: '中間' }); setIsAddModalOpen(true); }} className="bg-red-950/40 hover:bg-red-900/50 text-red-400 border border-red-500/30 px-4 py-2 rounded-xl font-bold text-sm flex items-center transition-all w-full sm:w-auto justify-center whitespace-nowrap">
                     <Plus className="w-4 h-4 mr-2" /> 過去問を追加
                   </button>
                 </div>
@@ -996,15 +1047,7 @@ export default function App() {
               {isLoading ? (
                 <div className="flex flex-col items-center justify-center h-64 text-slate-400"><Loader2 className="w-10 h-10 animate-spin text-emerald-500 mb-4" /></div>
               ) : (() => {
-                const exams = filteredNotes.filter(n => {
-                  if (getItemType(n.tags) !== 'exam') return false;
-                  const meta = getExamMeta(n.tags);
-                  if (examFilter.grade && meta.grade !== examFilter.grade) return false;
-                  if (examFilter.term && meta.term !== examFilter.term) return false;
-                  if (examFilter.type && meta.type !== examFilter.type) return false;
-                  return true;
-                });
-
+                const exams = getFilteredItemsByType('exam');
                 if (exams.length === 0) {
                   return (
                     <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-slate-800 rounded-3xl text-slate-500">
@@ -1013,7 +1056,6 @@ export default function App() {
                     </div>
                   );
                 }
-
                 return (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {exams.map(renderNoteCard)}
@@ -1025,13 +1067,37 @@ export default function App() {
 
           {activeView === 'materials' && (
             <div className="max-w-7xl mx-auto animate-in fade-in duration-500 text-left">
-              <div className="flex items-center justify-between mb-8">
-                <h2 className="text-2xl font-black text-white flex items-center"><Bookmark className="w-6 h-6 mr-3 text-blue-500" /> 学習資料・プリント</h2>
-                <button onClick={() => { setNewItemType('material'); setIsAddModalOpen(true); }} className="bg-blue-950/40 hover:bg-blue-900/50 text-blue-400 border border-blue-500/30 px-4 py-2 rounded-xl font-bold text-sm flex items-center transition-all whitespace-nowrap">
-                  <Plus className="w-4 h-4 mr-2" /> 資料を追加
-                </button>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
+                <h2 className="text-2xl font-black text-white flex items-center">
+                  <Bookmark className="w-6 h-6 mr-3 text-blue-500" /> 学習資料・プリント
+                </h2>
+                <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
+                  {/* 絞り込みUIを学習資料画面にも追加 */}
+                  {renderFilterUI(false)}
+                  <button onClick={() => { setNewItemType('material'); setItemMeta({ grade: '', term: '', type: '中間' }); setIsAddModalOpen(true); }} className="bg-blue-950/40 hover:bg-blue-900/50 text-blue-400 border border-blue-500/30 px-4 py-2 rounded-xl font-bold text-sm flex items-center transition-all w-full sm:w-auto justify-center whitespace-nowrap">
+                    <Plus className="w-4 h-4 mr-2" /> 資料を追加
+                  </button>
+                </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">{filteredNotes.filter(n => getItemType(n.tags) === 'material').map(renderNoteCard)}</div>
+              
+              {isLoading ? (
+                <div className="flex flex-col items-center justify-center h-64 text-slate-400"><Loader2 className="w-10 h-10 animate-spin text-emerald-500 mb-4" /></div>
+              ) : (() => {
+                const materials = getFilteredItemsByType('material');
+                if (materials.length === 0) {
+                  return (
+                    <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-slate-800 rounded-3xl text-slate-500">
+                      <Search className="w-12 h-12 mb-4 opacity-20" />
+                      <p className="font-bold">条件に合う資料がありません</p>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {materials.map(renderNoteCard)}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
