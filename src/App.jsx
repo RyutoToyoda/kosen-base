@@ -28,19 +28,24 @@ import {
 } from 'lucide-react';
 
 // =========================================================================
-// 【重要】本番環境（Vercel）で動かすための最終ステップ
-// 以下の4行の先頭にある「// 」を必ず消して有効化してください！
+// 本番環境（Vercel）用設定
+// SupabaseとGeminiの環境変数を読み込みます。
 // =========================================================================
 import { createClient } from '@supabase/supabase-js';
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-const VERCEL_GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+
+// Viteの静的置換とプレビュー環境の両方に対応した安全な読み込み
+// @ts-ignore
+const SUPABASE_URL = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_SUPABASE_URL || '' : '';
+// @ts-ignore
+const SUPABASE_ANON_KEY = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_SUPABASE_ANON_KEY || '' : '';
+// @ts-ignore
+const VERCEL_GEMINI_API_KEY = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_GEMINI_API_KEY || '' : '';
 
 const apiKey = ""; // プレビュー環境用の自動注入APIキー
 const GEMINI_API_KEY = VERCEL_GEMINI_API_KEY || apiKey;
 
 const isCreateClientImported = typeof createClient !== 'undefined';
-const hasEnvVars = SUPABASE_URL.length > 5 && SUPABASE_ANON_KEY.length > 5;
+const hasEnvVars = SUPABASE_URL && SUPABASE_URL.length > 5 && SUPABASE_ANON_KEY && SUPABASE_ANON_KEY.length > 5;
 const isSupabaseReady = isCreateClientImported && hasEnvVars;
 
 let supabase;
@@ -49,8 +54,15 @@ if (isSupabaseReady) {
   // @ts-ignore
   supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 } else {
-  // 環境変数が未設定の場合のダミーオブジェクト（白画面クラッシュ防止）
-  const mockError = { error: { message: "環境変数またはインポートが設定されていません。" }, data: null };
+  // 環境変数が未設定の場合のダミーオブジェクト
+  const getErrorMessage = () => {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      return "Vercelの環境変数（VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY）が読み込めていません。設定とRedeployを確認してください。";
+    }
+    return "Supabaseの初期化に失敗しました。";
+  };
+  const mockError = { error: { message: getErrorMessage() }, data: null };
+  
   supabase = {
     auth: {
       getSession: () => Promise.resolve({ data: { session: null } }),
@@ -197,11 +209,8 @@ export default function App() {
 
   // --- 準備状態の確認 ---
   const checkReady = () => {
-    if (!isCreateClientImported) {
-      throw new Error("コード上部のコメントアウト (import { createClient }...) を外して保存してください。");
-    }
-    if (!hasEnvVars) {
-      throw new Error("環境変数が読み込めていません。不要なダミー変数を削除し、Vercelで「Redeploy」を行ってください。");
+    if (!isSupabaseReady) {
+      throw new Error("環境変数が読み込めていません。Vercelで「Redeploy」を行ってください。");
     }
   };
 
