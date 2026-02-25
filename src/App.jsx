@@ -27,7 +27,8 @@ import {
   Bookmark,
   Filter,
   Eye,
-  EyeOff
+  EyeOff,
+  Pencil
 } from 'lucide-react';
 
 // =========================================================================
@@ -77,6 +78,7 @@ if (isSupabaseReady) {
         order: () => Promise.resolve({ data: [], error: null })
       }),
       insert: () => Promise.resolve({ error: null }),
+      update: () => ({ eq: () => Promise.resolve({ error: null }) }),
       delete: () => ({ eq: () => Promise.resolve({ error: null }) })
     })
   };
@@ -139,6 +141,7 @@ export default function App() {
   const [relevanceAnalysis, setRelevanceAnalysis] = useState({ loading: false, text: null, error: null });
   
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editNoteId, setEditNoteId] = useState(null); // 編集対象のノートID
   const [newItemType, setNewItemType] = useState('note');
   const [newNote, setNewNote] = useState({ title: '', subject: '', preview: '', tags: '' });
   const [itemMeta, setItemMeta] = useState({ grade: '', term: '', type: '中間' }); // メタデータを共通化
@@ -331,7 +334,31 @@ export default function App() {
     }
   };
 
-  const handleManualAdd = async (e) => {
+  // 編集モーダルを開く関数
+  const openEditModal = (note) => {
+    setEditNoteId(note.id);
+    setNewItemType(getItemType(note.tags));
+    const meta = getItemMeta(note.tags);
+    setItemMeta({ grade: meta.grade || '', term: meta.term || '', type: meta.type || '中間' });
+    
+    // システムタグ（type:, grade:など）を除外してユーザーのタグだけを表示用にする
+    const userTags = Array.isArray(note.tags) 
+      ? note.tags.filter(t => !t.startsWith('type:') && !t.startsWith('grade:') && !t.startsWith('term:') && !t.startsWith('exam:')).join(', ')
+      : '';
+
+    setNewNote({
+      title: note.title,
+      subject: note.subject,
+      preview: note.preview,
+      tags: userTags
+    });
+    
+    setIsAddModalOpen(true);
+    setSelectedNote(null);
+    setMenuOpenId(null);
+  };
+
+  const handleSaveItem = async (e) => {
     e.preventDefault();
     if (!newNote.title || !newNote.subject || !session) return;
     setIsAdding(true); setAnalyzeMessage({ type: null, text: null });
@@ -346,15 +373,26 @@ export default function App() {
       if (newItemType === 'exam' && itemMeta.type) parsedTags.push(`exam:${itemMeta.type}`);
 
       const noteData = {
-        title: newNote.title, subject: newNote.subject, preview: newNote.preview, tags: parsedTags,
-        date: new Date().toISOString().split('T')[0], user_id: session.user.id
+        title: newNote.title, subject: newNote.subject, preview: newNote.preview, tags: parsedTags
       };
-      const { error } = await supabase.from('notes').insert([noteData]);
-      if (error) throw error;
+
+      if (editNoteId) {
+        // 更新処理
+        const { error } = await supabase.from('notes').update(noteData).eq('id', editNoteId);
+        if (error) throw error;
+        setAnalyzeMessage({ type: 'success', text: 'アイテムを更新しました！' });
+      } else {
+        // 新規追加処理
+        noteData.date = new Date().toISOString().split('T')[0];
+        noteData.user_id = session.user.id;
+        const { error } = await supabase.from('notes').insert([noteData]);
+        if (error) throw error;
+        setAnalyzeMessage({ type: 'success', text: 'アイテムを追加しました！' });
+      }
       
       await fetchNotes();
-      setAnalyzeMessage({ type: 'success', text: 'アイテムを追加しました！' });
       setIsAddModalOpen(false); 
+      setEditNoteId(null);
       setNewNote({ title: '', subject: '', preview: '', tags: '' });
       setItemMeta({ grade: '', term: '', type: '中間' });
     } catch (err) { setAnalyzeMessage({ type: 'error', text: `${err.message}` }); } 
@@ -364,15 +402,6 @@ export default function App() {
   const handleImageUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file || !session) return;
-
-    // --- 追加: ファイルサイズ制限 (10MB) ---
-    // 大きなPDFをBase64変換するとクラッシュやAPIエラーの原因になるため制限
-    if (file.size > 10 * 1024 * 1024) {
-      setAnalyzeMessage({ type: 'error', text: 'ファイルサイズは10MB以下にしてください。' });
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 5000);
-      return;
-    }
 
     setIsAnalyzing(true); setAnalyzeMessage({ type: null, text: null });
     try {
@@ -388,7 +417,7 @@ export default function App() {
       const response = await fetch(apiUrl, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ role: "user", parts: [
-          { text: "提供された画像またはPDF文書から学習ノートの情報を抽出し、JSON形式で返してください。純粋なJSONのみを返してください。\n{\n  \"title\": \"ノートのタイトル\",\n  \"subject\": \"科目名\",\n  \"preview\": \"内容の要約(150文字程度)\",\n  \"tags\": [\"タグ1\", \"タグ2\"]\n}" },
+          { text: "提供された画像から学習ノートの情報を抽出し、JSON形式で返してください。純粋なJSONのみを返してください。\n{\n  \"title\": \"ノートのタイトル\",\n  \"subject\": \"科目名\",\n  \"preview\": \"内容の要約(150文字程度)\",\n  \"tags\": [\"タグ1\", \"タグ2\"]\n}" },
           { inlineData: { mimeType: file.type, data: base64Data } }
         ]}]})
       });
@@ -405,7 +434,7 @@ export default function App() {
       }]);
       if (error) throw error;
       await fetchNotes();
-      setAnalyzeMessage({ type: 'success', text: 'ファイル解析に成功し保存されました！' });
+      setAnalyzeMessage({ type: 'success', text: '画像解析に成功し保存されました！' });
     } catch (err) { setAnalyzeMessage({ type: 'error', text: `${err.message}` }); } 
     finally { setIsAnalyzing(false); if (fileInputRef.current) fileInputRef.current.value = ''; setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 7000); }
   };
@@ -511,7 +540,10 @@ export default function App() {
               <MoreVertical className="w-4 h-4" />
             </button>
             {menuOpenId === note.id && (
-              <div className="absolute right-0 top-8 w-32 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+              <div className="absolute right-0 top-8 w-36 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 z-50">
+                <button onClick={(e) => { e.stopPropagation(); openEditModal(note); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-300 hover:bg-slate-700 transition-colors flex items-center border-b border-slate-700/50">
+                  <Pencil className="w-3.5 h-3.5 mr-2" /> 編集する
+                </button>
                 <button onClick={(e) => { e.stopPropagation(); deleteNote(note.id); }} className="w-full text-left px-4 py-3 text-xs font-bold text-red-400 hover:bg-red-500/10 transition-colors flex items-center">
                   <Trash2 className="w-3.5 h-3.5 mr-2" /> 削除する
                 </button>
@@ -639,9 +671,14 @@ export default function App() {
                 </div>
                 <h2 className="text-2xl sm:text-4xl font-black text-white leading-tight">{selectedNote.title}</h2>
               </div>
-              <button onClick={() => { setSelectedNote(null); setRelevanceAnalysis({ loading: false, text: null, error: null }); }} className="p-3 bg-slate-800/50 hover:bg-slate-700 rounded-full text-slate-400 hover:text-white transition-colors shrink-0">
-                 <X className="w-6 h-6" />
-              </button>
+              <div className="flex items-center shrink-0">
+                <button onClick={() => openEditModal(selectedNote)} className="p-3 bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-500/30 rounded-full text-emerald-400 transition-colors shrink-0 mr-3">
+                   <Pencil className="w-5 h-5" />
+                </button>
+                <button onClick={() => { setSelectedNote(null); setRelevanceAnalysis({ loading: false, text: null, error: null }); }} className="p-3 bg-slate-800/50 hover:bg-slate-700 rounded-full text-slate-400 hover:text-white transition-colors shrink-0">
+                   <X className="w-6 h-6" />
+                </button>
+              </div>
             </div>
             
             <div className="flex-1 overflow-y-auto pr-2 scrollbar-hide space-y-8 text-left">
@@ -781,11 +818,14 @@ export default function App() {
         </div>
       )}
 
-      {/* 手動追加モーダル */}
+      {/* 手動追加・編集モーダル */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="bg-[#0d1424] border border-slate-700 rounded-3xl p-6 w-full max-w-md shadow-2xl relative animate-in zoom-in-95 duration-200 text-left">
-            <h2 className="text-xl font-black text-white mb-6 flex items-center"><Plus className="w-5 h-5 mr-2 text-emerald-500" />新規アイテム作成</h2>
+            <h2 className="text-xl font-black text-white mb-6 flex items-center">
+              {editNoteId ? <Pencil className="w-5 h-5 mr-2 text-emerald-500" /> : <Plus className="w-5 h-5 mr-2 text-emerald-500" />}
+              {editNoteId ? 'アイテムを編集' : '新規アイテム作成'}
+            </h2>
             
             <div className="flex bg-[#161f33] p-1 rounded-xl mb-6">
               <button onClick={() => setNewItemType('note')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${newItemType==='note' ? 'bg-emerald-600 text-white shadow-md':'text-slate-400 hover:text-slate-300'}`}>ノート</button>
@@ -793,7 +833,7 @@ export default function App() {
               <button onClick={() => setNewItemType('material')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${newItemType==='material' ? 'bg-emerald-600 text-white shadow-md':'text-slate-400 hover:text-slate-300'}`}>資料</button>
             </div>
 
-            <form onSubmit={handleManualAdd} className="space-y-4">
+            <form onSubmit={handleSaveItem} className="space-y-4">
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase">タイトル (必須)</label>
                 <input list="title-suggestions" type="text" required value={newNote.title} onChange={e => setNewNote({...newNote, title: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-sm" placeholder="線形代数 第1回..." />
@@ -831,8 +871,15 @@ export default function App() {
               <div><label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase">タグ (カンマ区切り)</label><input type="text" value={newNote.tags} onChange={e => setNewNote({...newNote, tags: e.target.value})} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-sm" placeholder="重要, 微分..." /></div>
               
               <div className="flex space-x-3 pt-4">
-                <button type="button" onClick={() => setIsAddModalOpen(false)} className="flex-1 bg-[#161f33] hover:bg-slate-700 text-white py-3 rounded-xl font-bold border border-slate-700 text-sm">キャンセル</button>
-                <button type="submit" disabled={isAdding} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold flex items-center justify-center text-sm disabled:opacity-50">{isAdding ? <Loader2 className="w-5 h-5 animate-spin" /> : '追加する'}</button>
+                <button type="button" onClick={() => {
+                  setIsAddModalOpen(false);
+                  setEditNoteId(null);
+                  setNewNote({ title: '', subject: '', preview: '', tags: '' });
+                  setItemMeta({ grade: '', term: '', type: '中間' });
+                }} className="flex-1 bg-[#161f33] hover:bg-slate-700 text-white py-3 rounded-xl font-bold border border-slate-700 text-sm">キャンセル</button>
+                <button type="submit" disabled={isAdding} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold flex items-center justify-center text-sm disabled:opacity-50">
+                  {isAdding ? <Loader2 className="w-5 h-5 animate-spin" /> : (editNoteId ? '更新する' : '追加する')}
+                </button>
               </div>
             </form>
           </div>
@@ -902,14 +949,16 @@ export default function App() {
           </div>
           
           <div className="ml-4 flex items-center space-x-3">
-            <input type="file" accept="image/*,application/pdf" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
+            <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
             <button onClick={() => fileInputRef.current?.click()} disabled={isAnalyzing} className="flex items-center bg-[#161f33] hover:bg-slate-700 text-slate-300 border border-slate-700 px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 text-sm shadow-md">
-              {isAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin text-emerald-500" /> : <ImagePlus className="w-4 h-4 mr-2 text-emerald-500" />} {isAnalyzing ? '解析中...' : 'AIで追加 (画像/PDF)'}
+              {isAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin text-emerald-500" /> : <ImagePlus className="w-4 h-4 mr-2 text-emerald-500" />} {isAnalyzing ? '解析中...' : '画像から追加'}
             </button>
             <button onClick={() => {
               // 現在の画面に合わせてデフォルトの追加タイプを設定
               setNewItemType(activeView === 'exams' ? 'exam' : activeView === 'materials' ? 'material' : 'note');
               setItemMeta({ grade: '', term: '', type: '中間' });
+              setEditNoteId(null);
+              setNewNote({ title: '', subject: '', preview: '', tags: '' });
               setIsAddModalOpen(true);
             }} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold transition-all shadow-lg shadow-emerald-900/20 text-sm flex items-center active:scale-95">
               <Plus className="w-4 h-4 mr-1" /> 新規作成
@@ -1024,8 +1073,9 @@ export default function App() {
                     </h2>
                     <button onClick={() => { 
                       setNewItemType('note'); 
-                      setNewNote({...newNote, subject: selectedSubject}); 
+                      setNewNote({ title: '', subject: selectedSubject, preview: '', tags: ''}); 
                       setItemMeta({ grade: '', term: '', type: '中間' });
+                      setEditNoteId(null);
                       setIsAddModalOpen(true); 
                     }} className="bg-[#1e293b] hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 px-4 py-2 rounded-lg font-bold text-sm flex items-center transition-all">
                       <Plus className="w-4 h-4 mr-2" /> この科目にノートを追加
@@ -1048,7 +1098,13 @@ export default function App() {
                 </h2>
                 <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
                   {renderFilterUI(true)}
-                  <button onClick={() => { setNewItemType('exam'); setItemMeta({ grade: '', term: '', type: '中間' }); setIsAddModalOpen(true); }} className="bg-red-950/40 hover:bg-red-900/50 text-red-400 border border-red-500/30 px-4 py-2 rounded-xl font-bold text-sm flex items-center transition-all w-full sm:w-auto justify-center whitespace-nowrap">
+                  <button onClick={() => { 
+                    setNewItemType('exam'); 
+                    setItemMeta({ grade: '', term: '', type: '中間' }); 
+                    setEditNoteId(null);
+                    setNewNote({ title: '', subject: '', preview: '', tags: '' });
+                    setIsAddModalOpen(true); 
+                  }} className="bg-red-950/40 hover:bg-red-900/50 text-red-400 border border-red-500/30 px-4 py-2 rounded-xl font-bold text-sm flex items-center transition-all w-full sm:w-auto justify-center whitespace-nowrap">
                     <Plus className="w-4 h-4 mr-2" /> 過去問を追加
                   </button>
                 </div>
@@ -1084,7 +1140,13 @@ export default function App() {
                 <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
                   {/* 絞り込みUIを学習資料画面にも追加 */}
                   {renderFilterUI(false)}
-                  <button onClick={() => { setNewItemType('material'); setItemMeta({ grade: '', term: '', type: '中間' }); setIsAddModalOpen(true); }} className="bg-blue-950/40 hover:bg-blue-900/50 text-blue-400 border border-blue-500/30 px-4 py-2 rounded-xl font-bold text-sm flex items-center transition-all w-full sm:w-auto justify-center whitespace-nowrap">
+                  <button onClick={() => { 
+                    setNewItemType('material'); 
+                    setItemMeta({ grade: '', term: '', type: '中間' }); 
+                    setEditNoteId(null);
+                    setNewNote({ title: '', subject: '', preview: '', tags: '' });
+                    setIsAddModalOpen(true); 
+                  }} className="bg-blue-950/40 hover:bg-blue-900/50 text-blue-400 border border-blue-500/30 px-4 py-2 rounded-xl font-bold text-sm flex items-center transition-all w-full sm:w-auto justify-center whitespace-nowrap">
                     <Plus className="w-4 h-4 mr-2" /> 資料を追加
                   </button>
                 </div>
