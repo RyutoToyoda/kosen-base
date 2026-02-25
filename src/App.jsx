@@ -364,6 +364,16 @@ export default function App() {
   const handleImageUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file || !session) return;
+
+    // --- 追加: ファイルサイズ制限 (10MB) ---
+    // 大きなPDFをBase64変換するとクラッシュやAPIエラーの原因になるため制限
+    if (file.size > 10 * 1024 * 1024) {
+      setAnalyzeMessage({ type: 'error', text: 'ファイルサイズは10MB以下にしてください。' });
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 5000);
+      return;
+    }
+
     setIsAnalyzing(true); setAnalyzeMessage({ type: null, text: null });
     try {
       checkReadyState();
@@ -378,7 +388,7 @@ export default function App() {
       const response = await fetch(apiUrl, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ role: "user", parts: [
-          { text: "提供された画像から学習ノートの情報を抽出し、JSON形式で返してください。純粋なJSONのみを返してください。\n{\n  \"title\": \"ノートのタイトル\",\n  \"subject\": \"科目名\",\n  \"preview\": \"内容の要約(150文字程度)\",\n  \"tags\": [\"タグ1\", \"タグ2\"]\n}" },
+          { text: "提供された画像またはPDF文書から学習ノートの情報を抽出し、JSON形式で返してください。純粋なJSONのみを返してください。\n{\n  \"title\": \"ノートのタイトル\",\n  \"subject\": \"科目名\",\n  \"preview\": \"内容の要約(150文字程度)\",\n  \"tags\": [\"タグ1\", \"タグ2\"]\n}" },
           { inlineData: { mimeType: file.type, data: base64Data } }
         ]}]})
       });
@@ -395,7 +405,7 @@ export default function App() {
       }]);
       if (error) throw error;
       await fetchNotes();
-      setAnalyzeMessage({ type: 'success', text: '画像解析に成功し保存されました！' });
+      setAnalyzeMessage({ type: 'success', text: 'ファイル解析に成功し保存されました！' });
     } catch (err) { setAnalyzeMessage({ type: 'error', text: `${err.message}` }); } 
     finally { setIsAnalyzing(false); if (fileInputRef.current) fileInputRef.current.value = ''; setTimeout(() => setAnalyzeMessage({ type: null, text: null }), 7000); }
   };
@@ -564,7 +574,7 @@ export default function App() {
             <div>
               <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest">Password</label>
               <div className="relative">
-                <input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3.5 pr-12 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm shadow-inner" placeholder="••••••••" />
+                <input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-[#161f33] border border-slate-700 text-slate-200 rounded-xl px-4 py-3.5 pr-12 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-sm shadow-inner" />
                 <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors">
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -892,9 +902,9 @@ export default function App() {
           </div>
           
           <div className="ml-4 flex items-center space-x-3">
-            <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
+            <input type="file" accept="image/*,application/pdf" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
             <button onClick={() => fileInputRef.current?.click()} disabled={isAnalyzing} className="flex items-center bg-[#161f33] hover:bg-slate-700 text-slate-300 border border-slate-700 px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 text-sm shadow-md">
-              {isAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin text-emerald-500" /> : <ImagePlus className="w-4 h-4 mr-2 text-emerald-500" />} {isAnalyzing ? '解析中...' : '画像から追加'}
+              {isAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin text-emerald-500" /> : <ImagePlus className="w-4 h-4 mr-2 text-emerald-500" />} {isAnalyzing ? '解析中...' : 'AIで追加 (画像/PDF)'}
             </button>
             <button onClick={() => {
               // 現在の画面に合わせてデフォルトの追加タイプを設定
